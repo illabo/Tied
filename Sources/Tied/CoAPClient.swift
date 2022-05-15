@@ -91,18 +91,24 @@ extension CoAPClient.Connection {
 
     private func doReads() {
         guard networkConnection.state == .ready else { return }
-        networkConnection.receiveMessage { [weak self] completeContent, contentContext, isComplete, error in
+        networkConnection.receiveMessage { [weak self] completeContent, contentContext, _, error in
             guard let self = self else { return }
-            print(completeContent, contentContext, isComplete, error)
 
             self.timestamp = Date().timeIntervalSince1970
 
             if let error = error {
                 self.messagePublisher.send(completion: .failure(error))
                 self.networkConnection.cancel()
+                return
             }
-            if let message = completeContent {
-                self.messagePublisher.send(CoAPMessage(token: 0, payload: message, observe: false))
+//            if let message = completeContent {
+//                self.messagePublisher.send(CoAPMessage(token: 0, payload: message, observe: false))
+//            }
+
+            if let message = contentContext?.protocolMetadata(definition: CoAPProtocol.definition) as? NWProtocolFramer.Message,
+               let content = completeContent
+            {
+                self.messagePublisher.send(CoAPMessage(token: 0, payload: content, metadata: message, observe: false))
             }
 
             self.doReads()
@@ -110,23 +116,22 @@ extension CoAPClient.Connection {
     }
 
     private static func mustGetParameters(with settings: CoAPClient.Settings) -> NWParameters {
+        var parameters: NWParameters!
         if let security = settings.security {
-            return NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
+            parameters = NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
         }
-        return .udp
+        parameters = .udp
+        let framerOptions = NWProtocolFramer.Options(definition: CoAPProtocol.definition)
+        parameters.defaultProtocolStack.applicationProtocols.insert(framerOptions, at: 0)
+        return parameters
     }
 
     private static func tlsWithPSKOptions(_ security: CoAPClient.Settings.Security) -> NWProtocolTLS.Options {
         let tlsOptions = NWProtocolTLS.Options()
-        let semaphore = DispatchSemaphore(value: 0)
-        security.psk.withUnsafeBytes { (pointer: UnsafeRawBufferPointer) in
-            defer { semaphore.signal() }
-            let dd = DispatchData(bytes: pointer)
-            let hint = DispatchData(bytes: security.pskHint.data(using: .utf8)!.withUnsafeBytes { $0 })
-            sec_protocol_options_add_pre_shared_key(tlsOptions.securityProtocolOptions, dd as __DispatchData, hint as __DispatchData)
-            sec_protocol_options_append_tls_ciphersuite(tlsOptions.securityProtocolOptions, tls_ciphersuite_t(rawValue: UInt16(security.cipherSuite))!)
-        }
-        semaphore.wait()
+        let key = security.psk.withUnsafeBytes { DispatchData(bytes: $0) }
+        let hint = security.pskHint.data(using: .utf8)!.withUnsafeBytes { DispatchData(bytes: $0) }
+        sec_protocol_options_add_pre_shared_key(tlsOptions.securityProtocolOptions, key as __DispatchData, hint as __DispatchData)
+        sec_protocol_options_append_tls_ciphersuite(tlsOptions.securityProtocolOptions, tls_ciphersuite_t(rawValue: UInt16(security.cipherSuite))!)
         return tlsOptions
     }
 

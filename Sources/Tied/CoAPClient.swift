@@ -10,18 +10,12 @@ import Foundation
 import Network
 import os.log
 
-typealias CoAPMessagePublisher = PassthroughSubject<Data, Error>
+typealias ConnectionMessagesPublisher = PassthroughSubject<CoAPMessage, Error>
 
 public class CoAPClient {
     private var connections: [NWEndpoint: Connection] = [:]
-    public func session(with settings: Settings) -> MessageSession {
-        let connection = mustGetConnection(with: settings)
-        let publisher = connection.messagePublisher
 
-        return MessageSession(publisher: publisher, token: 0) { message in
-            connection.sendMessage(message)
-        }
-    }
+    // some func to send message.
 
     private func mustGetConnection(with settings: Settings) -> Connection {
         if let connection = connections[settings.endpoint] {
@@ -30,10 +24,10 @@ public class CoAPClient {
         return Connection(settings: settings)
     }
 
-    fileprivate class Connection {
+    class Connection {
         internal init(settings: Settings) {
             networkConnection = NWConnection(to: settings.endpoint, using: Self.mustGetParameters(with: settings))
-            messagePublisher = CoAPMessagePublisher()
+            messagePublisher = ConnectionMessagesPublisher()
             timestamp = Date().timeIntervalSince1970
             pingTimer = settings.pingEvery == 0 ? nil : Self.pingTimer(with: settings) { [weak self] timer in
                 guard let networkConnection = self?.networkConnection else { return }
@@ -49,7 +43,7 @@ public class CoAPClient {
             setupPublisher()
         }
 
-        let messagePublisher: CoAPMessagePublisher
+        let messagePublisher: ConnectionMessagesPublisher
         private let networkConnection: NWConnection
         private var timestamp: TimeInterval
         private var pingTimer: Timer?
@@ -69,7 +63,7 @@ public class CoAPClient {
 
             let psk: Data
             let pskHint: String
-            let cipherSuite: SSLCipherSuite // Adds ciphersuite but doesn't guarantie it's use
+            let cipherSuite: SSLCipherSuite // Adds ciphersuite but doesn't guarantee its use
         }
     }
 }
@@ -108,7 +102,7 @@ extension CoAPClient.Connection {
                 self.networkConnection.cancel()
             }
             if let message = completeContent {
-                self.messagePublisher.send(message)
+                self.messagePublisher.send(CoAPMessage(token: 0, payload: message, observe: false))
             }
 
             self.doReads()
@@ -145,12 +139,21 @@ extension CoAPClient.Connection {
 }
 
 extension CoAPClient.Connection {
-    func sendMessage(_ message: Data) {
-        networkConnection.send(content: message, completion: .contentProcessed { [weak self] error in
+    func sendMessage(_ message: CoAPMessage) {
+        networkConnection.send(content: message.data, completion: .contentProcessed { [weak self] error in
             guard let self = self else { return }
             if let error = error {
                 self.messagePublisher.send(completion: .failure(error))
             }
         })
+    }
+
+    func stopSession(for _: UInt64) {
+        // Send 'stop message' and remove token from allowed list.
+    }
+
+    func cancel() {
+        messagePublisher.send(completion: .finished)
+        networkConnection.cancel()
     }
 }

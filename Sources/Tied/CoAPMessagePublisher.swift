@@ -43,7 +43,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
             } receiveValue: { [weak self] message in
                 _ = self?.subscriber?.receive(message)
                 // If message has no observe option it is meant to be replied once.
-                if outgoingMessage.observe == false {
+                if outgoingMessage.options.contains(where: {$0.key == .observe}) == false {
                     self?.subscriber?.receive(completion: .finished)
                     self?.cancel()
                 }

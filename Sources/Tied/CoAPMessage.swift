@@ -31,18 +31,20 @@ public struct CoAPMessage {
         self.version = version
         self.type = type
         self.messageId = messageId
-        self.token = Data(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero })
+        self.token = token
         self.options = options
         self.payload = payload
     }
 
     var version: Version
     var type: MessageType
-    var tokenLength: UInt4 { UInt4(token.count) }
     var messageId: UInt8
-    var token: Data
+    var token: UInt64
     var options: MessageOptionSet
     var payload: Data
+    
+    private var tokenLength: UInt4 { UInt4(tokenData.count) }
+    private var tokenData: Data { Data(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero }) }
 
     public enum Version: UInt4 {
         case v1 = 1
@@ -91,6 +93,28 @@ public struct CoAPMessage {
     }
 
     typealias MessageOptionSet = [MessageOption]
+}
+
+extension CoAPMessage: DataCodable {
+    func encode() throws -> Data {
+        var output = Data()
+        
+        output.append(UInt8((version.rawValue << 2) + type.rawValue | tokenLength ))
+        // output.append(code)
+        output.append(messageId)
+        output.append(contentsOf: withUnsafeBytes(of: token){ [UInt8]($0) })
+        output.append(contentsOf: options.encode())
+        output.append(UInt8.max) // Payload separator.
+        output.append(contentsOf: payload)
+        
+        return output
+    }
+    
+    static func with(_ buffer: UnsafeMutableRawBufferPointer) throws -> CoAPMessage {
+        throw NSError(domain: "Error", code: 0)
+    }
+    
+    
 }
 
 extension CoAPMessage.MessageOptionSet: DataCodable {

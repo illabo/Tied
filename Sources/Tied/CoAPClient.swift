@@ -145,7 +145,7 @@ extension CoAPClient.Connection {
 
 extension CoAPClient.Connection {
     func sendMessage(_ message: CoAPMessage) {
-        networkConnection.send(content: message.data, completion: .contentProcessed { [weak self] error in
+        networkConnection.send(content: try! message.encode(), completion: .contentProcessed { [weak self] error in
             guard let self = self else { return }
             if let error = error {
                 self.messagePublisher.send(completion: .failure(error))

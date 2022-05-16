@@ -14,7 +14,7 @@ protocol DataEncodable {
 }
 
 protocol DataDecodable {
-    static func with(_ buffer: UnsafeMutableRawBufferPointer) throws -> Self
+    static func with(_ buffer: UnsafeRawBufferPointer) throws -> Self
 }
 
 protocol MessageCode {
@@ -63,6 +63,10 @@ public struct CoAPMessage {
 }
 
 extension CoAPMessage: DataCodable {
+    enum MessageError: Error {
+        case formatError
+    }
+
     func encode() throws -> Data {
         guard let codeValue = code.rawValue else {
             throw code.codeError
@@ -72,7 +76,7 @@ extension CoAPMessage: DataCodable {
 
         output.append(UInt8((version.rawValue << 2) + type.rawValue | tokenLength))
         output.append(codeValue)
-        output.append(contentsOf: Swift.withUnsafeBytes(of: messageId){ [UInt8]($0) })
+        output.append(contentsOf: Swift.withUnsafeBytes(of: messageId) { [UInt8]($0) })
 
         // 'Empty Message' code 0.00 should not have anything betond first 4 bytes.
         if code == Code.empty { return output }
@@ -85,8 +89,32 @@ extension CoAPMessage: DataCodable {
         return output
     }
 
-    static func with(_: UnsafeMutableRawBufferPointer) throws -> CoAPMessage {
-        throw NSError(domain: "Error", code: 0)
+    static func with(_ buffer: UnsafeRawBufferPointer) throws -> CoAPMessage {
+        let firstByte = buffer.load(fromByteOffset: 0, as: UInt8.self)
+        let tokenLength = firstByte & 0b0000_1111
+        let mostSignificant = UInt4(clamping: firstByte >> 4)
+        guard
+            let type = MessageType(rawValue: mostSignificant & 0b0011),
+            let version = Version(rawValue: (mostSignificant >> 2) & 0b0011),
+            let code = Code.code(from: buffer.load(fromByteOffset: 1, as: UInt8.self))
+        else { throw MessageError.formatError }
+        let messageId = buffer.load(fromByteOffset: 2, as: UInt16.self)
+        let token = (0 ..< tokenLength).map { offset in
+            buffer.load(fromByteOffset: 4 + Int(offset), as: UInt8.self)
+        }.withUnsafeBytes { $0.load(as: UInt64.self) }
+        let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF).map { Data($0) }
+        let options: MessageOptionSet = try splitOptionPayload.first?.withUnsafeBytes { try CoAPMessage.MessageOptionSet.with($0) } ?? []
+        let payload: Data = splitOptionPayload.last ?? Data()
+
+        return CoAPMessage(
+            version: version,
+            code: code,
+            type: type,
+            messageId: messageId,
+            token: token,
+            options: options,
+            payload: payload
+        )
     }
 }
 
@@ -114,8 +142,8 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
         return output
     }
 
-    static func with(_: UnsafeMutableRawBufferPointer) throws -> Self {
-        []
+    static func with(_ buffer: UnsafeRawBufferPointer) throws -> Self {
+        buffer.load(as: CoAPMessage.MessageOptionSet.self)
     }
 
     private static let extendTo8bitIndicator: UInt4 = 13
@@ -164,7 +192,7 @@ public extension CoAPMessage {
             }
         }
 
-        public enum Method: MessageCode{
+        public enum Method: MessageCode, CaseIterable {
             case get
             case post
             case put
@@ -184,7 +212,7 @@ public extension CoAPMessage {
             }
         }
 
-        public enum Request: MessageCode {
+        public enum Response: MessageCode, CaseIterable {
             case created
             case deleted
             case valid
@@ -260,6 +288,17 @@ public extension CoAPMessage {
             guard codeClass <= 0b111, codeDetail <= 0b11111 else { return nil }
             return UInt8((codeClass << 5) + codeDetail)
         }
+
+        static func code(from value: UInt8) -> MessageCode? {
+            if value == 0 { return Self.empty }
+            if let methodCode = Method.allCases.first(where: { $0.rawValue == value }) {
+                return methodCode
+            }
+            if let responseCode = Response.allCases.first(where: { $0.rawValue == value }) {
+                return responseCode
+            }
+            return Self.custom(codeClass: (value >> 5) & 0b111, codeDetail: value & 0b11111)
+        }
     }
 
     enum MessageType: UInt4 {
@@ -304,6 +343,7 @@ public extension CoAPMessage {
         }
     }
 
+    // Yes, it's not a Set but set in common sense.
     internal typealias MessageOptionSet = [MessageOption]
 }
 

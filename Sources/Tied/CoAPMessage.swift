@@ -25,6 +25,10 @@ extension MessageCode {
     var codeError: Error { NSError(domain: "CoAP Message Code Error", code: -1000) }
 }
 
+func == (lhs: MessageCode, rhs: MessageCode) -> Bool {
+    lhs.rawValue == rhs.rawValue
+}
+
 typealias DataCodable = DataEncodable & DataDecodable
 
 public struct CoAPMessage {
@@ -32,7 +36,7 @@ public struct CoAPMessage {
         version: CoAPMessage.Version = .v1,
         code: MessageCode,
         type: CoAPMessage.MessageType,
-        messageId: UInt8,
+        messageId: UInt16,
         token: UInt64,
         options: CoAPMessage.MessageOptionSet,
         payload: Data
@@ -49,26 +53,30 @@ public struct CoAPMessage {
     var version: Version
     var code: MessageCode
     var type: MessageType
-    var messageId: UInt8
+    var messageId: UInt16
     var token: UInt64
     var options: MessageOptionSet
     var payload: Data
 
-    private var tokenLength: UInt4 { UInt4(tokenData.count) }
+    private var tokenLength: UInt4 { code == Code.empty ? 0 : UInt4(tokenData.count) }
     private var tokenData: Data { Data(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero }) }
 }
 
 extension CoAPMessage: DataCodable {
     func encode() throws -> Data {
-        guard let code = code.rawValue else {
+        guard let codeValue = code.rawValue else {
             throw code.codeError
         }
-        
+
         var output = Data()
 
         output.append(UInt8((version.rawValue << 2) + type.rawValue | tokenLength))
-        output.append(code)
-        output.append(messageId)
+        output.append(codeValue)
+        output.append(contentsOf: Swift.withUnsafeBytes(of: messageId){ [UInt8]($0) })
+
+        // 'Empty Message' code 0.00 should not have anything betond first 4 bytes.
+        if code == Code.empty { return output }
+
         output.append(contentsOf: withUnsafeBytes(of: token) { [UInt8]($0) })
         output.append(contentsOf: options.encode())
         output.append(UInt8.max) // Payload separator.
@@ -138,25 +146,25 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
     }
 }
 
-extension CoAPMessage {
-    public enum Version: UInt4 {
+public extension CoAPMessage {
+    enum Version: UInt4 {
         case v1 = 1
     }
 
-    public enum Code: MessageCode {
+    enum Code: MessageCode {
         case empty
         case custom(codeClass: UInt8, codeDetail: UInt8)
-        
+
         public var rawValue: UInt8? {
             switch self {
             case .empty:
                 return Self.value(codeClass: 0, codeDetail: 00)
-            case .custom(codeClass: let c, codeDetail: let dd):
+            case let .custom(codeClass: c, codeDetail: dd):
                 return Self.value(codeClass: c, codeDetail: dd)
             }
         }
 
-        public enum Method: MessageCode {
+        public enum Method: MessageCode{
             case get
             case post
             case put
@@ -254,14 +262,14 @@ extension CoAPMessage {
         }
     }
 
-    public enum MessageType: UInt4 {
+    enum MessageType: UInt4 {
         case confirmable = 0
         case nonconfirmable = 1
         case acknowledgement = 2
         case reset = 3
     }
 
-    public struct MessageOption: Comparable {
+    struct MessageOption: Comparable {
         let key: MessageOptionKey
         let value: Data
 
@@ -270,7 +278,7 @@ extension CoAPMessage {
         }
     }
 
-    public enum MessageOptionKey: UInt8, Comparable {
+    enum MessageOptionKey: UInt8, Comparable {
         case ifMatch = 1
         case uriHost = 3
         case etag = 4
@@ -296,7 +304,7 @@ extension CoAPMessage {
         }
     }
 
-    typealias MessageOptionSet = [MessageOption]
+    internal typealias MessageOptionSet = [MessageOption]
 }
 
 private extension UInt32 {

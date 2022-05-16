@@ -26,3 +26,5 @@ class CoAPProtocol: NWProtocolFramerImplementation {
         // TODO: implement
     }
 }
+
+extension NWProtocolFramer.Message {}

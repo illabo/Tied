@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "uint4",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/markrenaud/UInt4",
+      "state" : {
+        "revision" : "8119eae23a6b4041cbd97c6742300a121c650b68",
+        "version" : "1.1.0"
+      }
+    }
+  ],
+  "version" : 2
+}

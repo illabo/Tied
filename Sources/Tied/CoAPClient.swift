@@ -116,7 +116,7 @@ extension CoAPClient.Connection {
     }
 
     private static func mustGetParameters(with settings: CoAPClient.Settings) -> NWParameters {
-        var parameters: NWParameters!
+        var parameters: NWParameters
         if let security = settings.security {
             parameters = NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
         }

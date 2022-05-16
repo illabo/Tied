@@ -102,7 +102,7 @@ extension CoAPMessage: DataCodable {
         let token = (0 ..< tokenLength).map { offset in
             buffer.load(fromByteOffset: 4 + Int(offset), as: UInt8.self)
         }.withUnsafeBytes { $0.load(as: UInt64.self) }
-        let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF).map { Data($0) }
+        let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF, maxSplits: 1).map { Data($0) }
         let options: MessageOptionSet = try splitOptionPayload.first?.withUnsafeBytes { try CoAPMessage.MessageOptionSet.with($0) } ?? []
         let payload: Data = splitOptionPayload.last ?? Data()
 

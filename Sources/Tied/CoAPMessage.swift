@@ -20,18 +20,29 @@ protocol DataDecodable {
 typealias DataCodable = DataEncodable & DataDecodable
 
 public struct CoAPMessage {
+    internal init(
+        version: CoAPMessage.Version = .v1,
+        type: CoAPMessage.MessageType,
+        messageId: UInt8,
+        token: UInt64,
+        options: CoAPMessage.MessageOptionSet,
+        payload: Data
+    ) {
+        self.version = version
+        self.type = type
+        self.messageId = messageId
+        self.token = Data(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero })
+        self.options = options
+        self.payload = payload
+    }
+
     var version: Version
     var type: MessageType
-    var tokenLength: UInt4 { UInt4(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero }.count) }
+    var tokenLength: UInt4 { UInt4(token.count) }
     var messageId: UInt8
-    var token: UInt64
+    var token: Data
     var options: MessageOptionSet
     var payload: Data
-    var metadata: NWProtocolFramer.Message
-    var observe: Bool
-    var data: Data {
-        payload
-    }
 
     public enum Version: UInt4 {
         case v1 = 1
@@ -83,7 +94,6 @@ public struct CoAPMessage {
 }
 
 extension CoAPMessage.MessageOptionSet: DataCodable {
-    
     func encode() -> Data {
         var lastDelta: UInt32 = 0
         var output = Data()
@@ -106,11 +116,11 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
 
         return output
     }
-    
+
     static func with(_: UnsafeMutableRawBufferPointer) throws -> Self {
         []
     }
-    
+
     private static let extendTo8bitIndicator: UInt4 = 13
     private static let extendTo16bitIndicator: UInt4 = 14
     private static let reservedIndicator: UInt4 = 15

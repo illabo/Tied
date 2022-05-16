@@ -108,7 +108,7 @@ extension CoAPClient.Connection {
             if let message = contentContext?.protocolMetadata(definition: CoAPProtocol.definition) as? NWProtocolFramer.Message,
                let content = completeContent
             {
-                self.messagePublisher.send(CoAPMessage(token: 0, payload: content, metadata: message, observe: false))
+//                self.messagePublisher.send(CoAPMessage(token: 0, payload: content, metadata: message, observe: false))
             }
 
             self.doReads()

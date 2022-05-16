@@ -56,8 +56,9 @@ public struct CoAPMessage {
     public enum MessageOptionKey: UInt8, Comparable {
         case ifMatch = 1
         case uriHost = 3
-        case eTag = 4
+        case etag = 4
         case ifNoneMatch = 5
+        case observe = 6
         case uriPort = 7
         case locationPath = 8
         case uriPath = 11
@@ -66,6 +67,9 @@ public struct CoAPMessage {
         case uriQuery = 15
         case accept = 17
         case locationQuery = 20
+        case block2 = 23
+        case block1 = 27
+        case size2 = 28
         case proxyUri = 35
         case proxyScheme = 39
         case size1 = 60
@@ -79,11 +83,7 @@ public struct CoAPMessage {
 }
 
 extension CoAPMessage.MessageOptionSet: DataCodable {
-    private enum CodingError: Error {
-        case encoding(String)
-        case decoding(String)
-    }
-
+    
     func encode() -> Data {
         var lastDelta: UInt32 = 0
         var output = Data()

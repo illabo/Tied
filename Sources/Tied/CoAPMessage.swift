@@ -49,7 +49,7 @@ public struct CoAPMessage {
         self.options = options
         self.payload = payload
     }
-
+    
     var version: Version
     var code: MessageCode
     var type: MessageType
@@ -57,7 +57,7 @@ public struct CoAPMessage {
     var token: UInt64
     var options: MessageOptionSet
     var payload: Data
-
+    
     private var tokenLength: UInt4 { code == Code.empty ? 0 : UInt4(tokenData.count) }
     private var tokenData: Data { Data(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero }) }
 }
@@ -66,29 +66,29 @@ extension CoAPMessage: DataCodable {
     enum MessageError: Error {
         case formatError
     }
-
+    
     func encode() throws -> Data {
         guard let codeValue = code.rawValue else {
             throw code.codeError
         }
-
+        
         var output = Data()
-
+        
         output.append(UInt8((version.rawValue << 2) + type.rawValue | tokenLength))
         output.append(codeValue)
         output.append(contentsOf: Swift.withUnsafeBytes(of: messageId) { [UInt8]($0) })
-
+        
         // 'Empty Message' code 0.00 should not have anything betond first 4 bytes.
         if code == Code.empty { return output }
-
+        
         output.append(contentsOf: withUnsafeBytes(of: token) { [UInt8]($0) })
         output.append(contentsOf: options.encode())
         output.append(UInt8.max) // Payload separator.
         output.append(contentsOf: payload)
-
+        
         return output
     }
-
+    
     static func with(_ buffer: UnsafeRawBufferPointer) throws -> CoAPMessage {
         let firstByte = buffer.load(fromByteOffset: 0, as: UInt8.self)
         let tokenLength = firstByte & 0b0000_1111
@@ -105,7 +105,7 @@ extension CoAPMessage: DataCodable {
         let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF, maxSplits: 1).map { Data($0) }
         let options: MessageOptionSet = try splitOptionPayload.first?.withUnsafeBytes { try CoAPMessage.MessageOptionSet.with($0) } ?? []
         let payload: Data = splitOptionPayload.last ?? Data()
-
+        
         return CoAPMessage(
             version: version,
             code: code,
@@ -116,40 +116,42 @@ extension CoAPMessage: DataCodable {
             payload: payload
         )
     }
+    
+    
 }
 
 extension CoAPMessage.MessageOptionSet: DataCodable {
     func encode() -> Data {
         var lastDelta: UInt32 = 0
         var output = Data()
-
+        
         sorted()
             .forEach { option in
                 let delta = UInt32(option.key) - lastDelta
                 let length = UInt32(option.value.count)
-
+                
                 let (optionDeltaValue, extendedDeltaValue) = Self.checkExtendedValue(delta)
                 let (optionLengthValue, extendedLengthValue) = Self.checkExtendedValue(length)
-
+                
                 output.append(UInt8(optionDeltaValue | optionLengthValue))
                 output.append(contentsOf: extendedDeltaValue)
                 output.append(contentsOf: extendedLengthValue)
                 output.append(contentsOf: option.value)
-
+                
                 lastDelta += UInt32(option.key)
             }
-
+        
         return output
     }
-
+    
     static func with(_ buffer: UnsafeRawBufferPointer) throws -> Self {
         buffer.load(as: CoAPMessage.MessageOptionSet.self)
     }
-
+    
     private static let extendTo8bitIndicator: UInt4 = 13
     private static let extendTo16bitIndicator: UInt4 = 14
     private static let reservedIndicator: UInt4 = 15
-
+    
     private static func checkExtendedValue(_ value: UInt32) -> (UInt4, Data) {
         if value < Self.extendTo8bitIndicator {
             return (
@@ -172,17 +174,139 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
         }
         return (0, Data())
     }
+    
+    static func seekSeparatorIndex(in bytes: [UInt8])->Int{
+        var skipping = 0
+        bytes.enumerated().forEach{ enumeratedBytes in
+            let offset = enumeratedBytes.offset
+            
+            // Check only currently awaited delta and length byte
+            if offset != skipping { return }
+            if offset == skipping, enumeratedBytes.element == 0xff { return }
+            
+            let byte = bytes[offset]
+            let length = byte & 0b1111
+            let delta = byte >> 4
+            
+            skipping += 1
+            var skipExtendedDelta = 0
+            if delta == Self.extendTo8bitIndicator  {
+                skipExtendedDelta = 1
+                skipping += 1
+            }
+            if delta == Self.extendTo16bitIndicator {
+                skipExtendedDelta = 2
+                skipping += 2
+            }
+            if length < Self.extendTo8bitIndicator {
+                skipping += Int(length)
+            }
+            if length == Self.extendTo8bitIndicator  {
+                let lengthByte = bytes[offset + 1 + skipExtendedDelta]
+                skipping += (1 + Int(Self.extendTo8bitIndicator) + Int(lengthByte))
+            }
+            if length == Self.extendTo16bitIndicator {
+                let lengthByte = UInt16(bytes[offset + 1 + skipExtendedDelta] | bytes[offset + 2 + skipExtendedDelta])
+                skipping += (1 + Int(Self.extendTo16bitIndicator) + Int(lengthByte))
+            }
+        }
+        return skipping
+    }
+    
+    static func parseOptionHeaderLength(optionHeaderByte byte: UInt8)throws->Int{
+        var headerLength = 1 // As we already have 1 byte with non-extended delta and length
+        let optionLength = byte & 0b1111
+        let optionDelta = byte >> 4
+        if optionDelta == Self.extendTo8bitIndicator {
+            headerLength += 1
+        }
+        if optionDelta == Self.extendTo16bitIndicator{
+            headerLength += 2
+        }
+        if optionDelta > Self.extendTo16bitIndicator {
+            throw CoAPMessage.MessageError.formatError
+        }
+        if optionLength == Self.extendTo8bitIndicator {
+            headerLength += 1
+        }
+        if optionLength == Self.extendTo16bitIndicator{
+            headerLength += 2
+        }
+        if optionLength > Self.extendTo16bitIndicator {
+            throw CoAPMessage.MessageError.formatError
+        }
+        return headerLength
+    }
+    
+    static func parseOptions(
+        parsing bytes: UnsafePointer<UInt8>,
+        startOffset offset: UnsafeMutablePointer<Int>,
+        output: UnsafeMutablePointer<[CoAPMessage.MessageOption]>
+    )throws{
+        var deltaLength = bytes.advanced(by: offset.pointee).pointee
+        var lastDelta = 0
+
+        while deltaLength != 0xFF {
+            offset.pointee += 1
+            
+            var optionLength  = Int(deltaLength & 0b1111)
+            var optionDelta  = Int(deltaLength >> 4)
+            
+            optionDelta = try Self.optionDeltaOrLengthValue(initialValue: optionDelta, parsing: bytes, currentOffset: offset)
+            optionLength = try Self.optionDeltaOrLengthValue(initialValue: optionLength, parsing: bytes, currentOffset: offset)
+            
+            // Here we should get the Option Number.
+            let optionNumber = optionDelta - lastDelta
+            let optionBody = bytes.advanced(by: offset.pointee).withMemoryRebound(to: Data.self, capacity: optionLength){ $0.pointee }
+            
+            guard let optionKey = CoAPMessage.MessageOptionKey(rawValue: UInt8(optionNumber)) else {
+                throw CoAPMessage.MessageError.formatError
+            }
+            
+            output.pointee.append(CoAPMessage.MessageOption(key: optionKey, value: optionBody))
+            
+            // Prep for the next parse.
+            lastDelta = optionDelta
+            offset.pointee += optionLength
+            
+            deltaLength = bytes.advanced(by: offset.pointee).pointee
+        }
+        
+
+    }
+    
+    // Returns the final value of extended Option Delta or Option Length
+    private static func optionDeltaOrLengthValue(
+    initialValue: Int,
+    parsing bytes: UnsafePointer<UInt8>,
+    currentOffset offset: UnsafeMutablePointer<Int>
+    )throws ->Int {
+        var value = initialValue
+        if value == Int(Self.extendTo8bitIndicator) {
+            let extendedLength = bytes.advanced(by: offset.pointee).pointee
+            value += Int(extendedLength)
+            offset.pointee += 1
+        }
+        if value == Int(Self.extendTo16bitIndicator) {
+            let extendedLength = bytes.advanced(by: offset.pointee).withMemoryRebound(to: UInt16.self, capacity: 1){ $0.pointee }
+            value += Int(extendedLength) + 0xFF
+            offset.pointee += 2
+        }
+        if value > Int(Self.extendTo16bitIndicator) { throw CoAPMessage.MessageError.formatError }
+        
+        return value
+    }
 }
 
 public extension CoAPMessage {
     enum Version: UInt4 {
         case v1 = 1
     }
-
+    
     enum Code: MessageCode {
         case empty
         case custom(codeClass: UInt8, codeDetail: UInt8)
-
+        
         public var rawValue: UInt8? {
             switch self {
             case .empty:
@@ -191,13 +315,13 @@ public extension CoAPMessage {
                 return Self.value(codeClass: c, codeDetail: dd)
             }
         }
-
+        
         public enum Method: MessageCode, CaseIterable {
             case get
             case post
             case put
             case delete
-
+            
             public var rawValue: UInt8? {
                 switch self {
                 case .get:
@@ -211,7 +335,7 @@ public extension CoAPMessage {
                 }
             }
         }
-
+        
         public enum Response: MessageCode, CaseIterable {
             case created
             case deleted
@@ -234,7 +358,7 @@ public extension CoAPMessage {
             case serviceUnavailable
             case gatewayTimeout
             case proxyingNotSupported
-
+            
             public var rawValue: UInt8? {
                 switch self {
                 case .created:
@@ -282,13 +406,13 @@ public extension CoAPMessage {
                 }
             }
         }
-
+        
         static func value(codeClass: UInt8, codeDetail: UInt8) -> UInt8? {
             // No more than 3 bits per class and 5 bits per detail.
             guard codeClass <= 0b111, codeDetail <= 0b11111 else { return nil }
             return UInt8((codeClass << 5) + codeDetail)
         }
-
+        
         static func code(from value: UInt8) -> MessageCode? {
             if value == 0 { return Self.empty }
             if let methodCode = Method.allCases.first(where: { $0.rawValue == value }) {
@@ -300,23 +424,23 @@ public extension CoAPMessage {
             return Self.custom(codeClass: (value >> 5) & 0b111, codeDetail: value & 0b11111)
         }
     }
-
+    
     enum MessageType: UInt4 {
         case confirmable = 0
         case nonconfirmable = 1
         case acknowledgement = 2
         case reset = 3
     }
-
+    
     struct MessageOption: Comparable {
         let key: MessageOptionKey
         let value: Data
-
+        
         public static func < (lhs: Self, rhs: Self) -> Bool {
             lhs.key < rhs.key
         }
     }
-
+    
     enum MessageOptionKey: UInt8, Comparable {
         case ifMatch = 1
         case uriHost = 3
@@ -337,12 +461,12 @@ public extension CoAPMessage {
         case proxyUri = 35
         case proxyScheme = 39
         case size1 = 60
-
+        
         public static func < (lhs: Self, rhs: Self) -> Bool {
             lhs.rawValue < rhs.rawValue
         }
     }
-
+    
     // Yes, it's not a Set but set in common sense.
     internal typealias MessageOptionSet = [MessageOption]
 }

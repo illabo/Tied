@@ -10,7 +10,7 @@ final class TiedTests: XCTestCase {
     }
     
     func testDataIsCorrect() throws {
-        let msg = CoAPMessage(code: CoAPMessage.Code.Method.get, type: .confirmable, messageId: 0, token: 1, options: [], payload: Data())
+        let msg = CoAPMessage(code: .get, type: .confirmable, messageId: 0, token: 1)
         
         let data = try msg.encode()
         

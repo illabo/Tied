@@ -59,7 +59,7 @@ public struct CoAPMessage {
     var payload: Data
     
     private var tokenLength: UInt4 { code == Code.empty ? 0 : UInt4(tokenData.count) }
-    private var tokenData: Data { Data(withUnsafeBytes(of: token) { [UInt8]($0) }.drop { $0 == .zero }) }
+    private var tokenData: Data { Data(withUnsafeBytes(of: token.bigEndian) { [UInt8]($0) }.drop { $0 == .zero }) }
 }
 
 extension CoAPMessage: DataCodable {
@@ -72,17 +72,37 @@ extension CoAPMessage: DataCodable {
             throw code.codeError
         }
         
+        // Message format per RFC 7252:
+        //
+        //  0                   1                   2                   3
+        //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        // |Ver| T |  TKL  |      Code     |          Message ID           |
+        // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        // |   Token (if any, TKL bytes) ...
+        // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        // |   Options (if any) ...
+        // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        // |1 1 1 1 1 1 1 1|    Payload (if any) ...
+        // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         var output = Data()
         
-        output.append(UInt8((version.rawValue << 2) + type.rawValue | tokenLength))
+        // Constructing and appending the first byte (Ver, T, TKL).
+        // Version and Type are of type UInt4 here.
+        let verT = (version.rawValue << 2) + type.rawValue
+        output.append(UInt8(verT) << 4 | UInt8(tokenLength))
         output.append(codeValue)
-        output.append(contentsOf: Swift.withUnsafeBytes(of: messageId) { [UInt8]($0) })
+        // Look after endianness!
+        output.append(contentsOf: Swift.withUnsafeBytes(of: messageId.bigEndian) { [UInt8]($0) })
         
-        // 'Empty Message' code 0.00 should not have anything betond first 4 bytes.
+        // 'Empty Message' code 0.00 should not have anything beyond first 4 bytes.
         if code == Code.empty { return output }
         
-        output.append(contentsOf: withUnsafeBytes(of: token) { [UInt8]($0) })
+        output.append(contentsOf: tokenData)
         output.append(contentsOf: options.encode())
+        
+        // If payload is not empty add separator and actual payload data.
+        guard payload.isEmpty == false else { return output }
         output.append(UInt8.max) // Payload separator.
         output.append(contentsOf: payload)
         

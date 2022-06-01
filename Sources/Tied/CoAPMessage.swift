@@ -175,12 +175,12 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
                 let (optionDeltaValue, extendedDeltaValue) = Self.checkExtendedValue(delta)
                 let (optionLengthValue, extendedLengthValue) = Self.checkExtendedValue(length)
 
-                output.append(UInt8(optionDeltaValue | optionLengthValue))
+                output.append(UInt8(optionDeltaValue) << 4 + UInt8(optionLengthValue))
                 output.append(contentsOf: extendedDeltaValue)
                 output.append(contentsOf: extendedLengthValue)
                 output.append(contentsOf: option.value)
 
-                lastDelta += UInt32(option.key)
+                lastDelta += delta
             }
 
         return output

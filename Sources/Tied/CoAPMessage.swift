@@ -143,27 +143,41 @@ extension CoAPMessage: DataCodable {
             let code = Code.code(from: buffer.load(fromByteOffset: 1, as: UInt8.self))
         else { throw MessageError.formatError }
         let messageId = buffer.load(fromByteOffset: 2, as: UInt16.self)
-        let token = (0 ..< tokenLength).map { offset in
-            buffer.load(fromByteOffset: 4 + Int(offset), as: UInt8.self)
-        }.withUnsafeBytes { $0.bindMemory(to: UInt64.self).baseAddress?.pointee } // $0.load(as: UInt64.self) }
+        let token = (0 ..< tokenLength).map { offset -> UInt8 in
+            let b = buffer.load(fromByteOffset: 4 + Int(offset), as: UInt8.self)
+            return b
+        }.reduce(into: UInt64(0)) {
+            $0 = UInt64($0 << 8) | UInt64($1)
+        }
 
         guard let pointer = buffer.bindMemory(to: UInt8.self).baseAddress else { throw MessageError.formatError }
-//        let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF, maxSplits: 1).map { Data($0) }
-//        let options: MessageOptionSet = try splitOptionPayload.first?.withUnsafeBytes { try CoAPMessage.MessageOptionSet.with($0) } ?? []
-//        let payload: Data = splitOptionPayload.last ?? Data()
         var offset = 4 + Int(tokenLength)
-        let maxOffset = buffer.count
+        let maxOffset = buffer.count // If no payload there's no payload separator. Options parsing should stop once the buffer end reached.
         var options: CoAPMessage.MessageOptionSet = []
         try MessageOptionSet.parseOptions(parsing: pointer, startOffset: &offset, maxOffset: maxOffset, output: &options)
+
+        var payload = Data()
+
+        if offset < maxOffset {
+            // Check payload separator value is correct.
+            guard pointer.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: 1, { $0.pointee }) == 0xFF else {
+                throw MessageError.formatError
+            }
+            offset += 1 // Skip the payload separator.
+            let capacity = maxOffset - offset
+            payload = pointer.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: capacity) {
+                Data(bytes: $0, count: capacity)
+            }
+        }
 
         return CoAPMessage(
             version: version,
             code: code,
             type: type,
             messageId: messageId,
-            token: token!,
+            token: token,
             options: options,
-            payload: Data()
+            payload: payload
         )
     }
 }
@@ -306,8 +320,8 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
 
             // Here we should get the Option Number.
             let optionNumber = optionDelta + lastDelta
-            let optionBody = bytes.advanced(by: offset.pointee).withMemoryRebound(to: UInt8.self, capacity: optionLength) { b in
-                Data(bytes: b, count: optionLength)
+            let optionBody = bytes.advanced(by: offset.pointee).withMemoryRebound(to: UInt8.self, capacity: optionLength) {
+                Data(bytes: $0, count: optionLength)
             }
 
             guard let optionKey = CoAPMessage.MessageOptionKey(rawValue: UInt8(optionNumber)) else {

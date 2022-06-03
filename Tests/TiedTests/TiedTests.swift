@@ -24,5 +24,26 @@ final class TiedTests: XCTestCase {
             try CoAPMessage.with($0)
         }
         XCTAssert(message.messageId == 0)
+        XCTAssert(message.options.map(\.key) == [.etag, .ifNoneMatch, .observe])
+        XCTAssert(message.options.map { [UInt8]($0.value).withUnsafeBytes { $0.load(as: Int.self) } } == [3, 5, 10])
+    }
+
+    func testMessageEncodePayload() throws {
+        let msg = CoAPMessage(code: .get, type: .confirmable, messageId: 0, token: 1000, payload: "Hello, there!".data(using: .utf8) ?? Data())
+
+        let data = try msg.encode()
+
+        XCTAssert([UInt8](data) == [66, 1, 0, 0, 3, 232, 255, 72, 101, 108, 108, 111, 44, 32, 116, 104, 101, 114, 101, 33])
+    }
+
+    func testMessageDecodePayload() throws {
+        let messageBytes: [UInt8] = [66, 1, 0, 0, 3, 232, 255, 72, 101, 108, 108, 111, 44, 32, 116, 104, 101, 114, 101, 33]
+        let message = try messageBytes.withUnsafeBytes {
+            try CoAPMessage.with($0)
+        }
+
+        XCTAssert(message.messageId == 0)
+        XCTAssert(message.token == 1000)
+        XCTAssert(String(bytes: message.payload, encoding: .utf8) == "Hello, there!")
     }
 }

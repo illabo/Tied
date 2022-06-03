@@ -207,6 +207,21 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
         return output
     }
 
+    // Option Delta and Option Length values explained per RFC 7252:
+    //
+    //  4-bit unsigned integer.  A value between 0 and 12
+    //     indicates the Option Delta.  Three values are reserved for special
+    //     constructs:
+    //
+    //     13:  An 8-bit unsigned integer follows the initial byte and
+    //        indicates the Option Delta minus 13.
+    //
+    //     14:  A 16-bit unsigned integer in network byte order follows the
+    //        initial byte and indicates the Option Delta minus 269.
+    //
+    //     15:  Reserved for the Payload Marker.  If the field is set to this
+    //        value but the entire byte is not the payload marker, this MUST
+    //        be processed as a message format error.
     private static let extendTo8bitIndicator: UInt4 = 13
     private static let extendTo16bitIndicator: UInt4 = 14
     private static let reservedIndicator: UInt4 = 15
@@ -265,6 +280,31 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
         maxOffset: Int,
         output: UnsafeMutablePointer<[CoAPMessage.MessageOption]>
     ) throws {
+        // Options format per RFC 7252:
+        //
+        //    0   1   2   3   4   5   6   7
+        //  +---------------+---------------+
+        //  |               |               |
+        //  |  Option Delta | Option Length |   1 byte
+        //  |               |               |
+        //  +---------------+---------------+
+        //  \                               \
+        //  /         Option Delta          /   0-2 bytes
+        //  \          (extended)           \
+        //  +-------------------------------+
+        //  \                               \
+        //  /         Option Length         /   0-2 bytes
+        //  \          (extended)           \
+        //  +-------------------------------+
+        //  \                               \
+        //  /                               /
+        //  \                               \
+        //  /         Option Value          /   0 or more bytes
+        //  \                               \
+        //  /                               /
+        //  \                               \
+        //  +-------------------------------+
+        //
         var deltaLength = bytes.advanced(by: offset.pointee).pointee
         var lastDelta = 0
 

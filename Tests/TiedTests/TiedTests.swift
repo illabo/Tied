@@ -17,4 +17,12 @@ final class TiedTests: XCTestCase {
 
         XCTAssert([UInt8](data) == [65, 1, 0, 0, 1, 72, 3, 0, 0, 0, 0, 0, 0, 0, 24, 5, 0, 0, 0, 0, 0, 0, 0, 24, 10, 0, 0, 0, 0, 0, 0, 0])
     }
+
+    func testMessageDecoded() throws {
+        let messageBytes: [UInt8] = [65, 1, 0, 0, 1, 72, 3, 0, 0, 0, 0, 0, 0, 0, 24, 5, 0, 0, 0, 0, 0, 0, 0, 24, 10, 0, 0, 0, 0, 0, 0, 0]
+        let message = try messageBytes.withUnsafeBytes {
+            try CoAPMessage.with($0)
+        }
+        XCTAssert(message.messageId == 0)
+    }
 }

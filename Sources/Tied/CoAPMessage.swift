@@ -145,19 +145,25 @@ extension CoAPMessage: DataCodable {
         let messageId = buffer.load(fromByteOffset: 2, as: UInt16.self)
         let token = (0 ..< tokenLength).map { offset in
             buffer.load(fromByteOffset: 4 + Int(offset), as: UInt8.self)
-        }.withUnsafeBytes { $0.load(as: UInt64.self) }
-        let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF, maxSplits: 1).map { Data($0) }
-        let options: MessageOptionSet = try splitOptionPayload.first?.withUnsafeBytes { try CoAPMessage.MessageOptionSet.with($0) } ?? []
-        let payload: Data = splitOptionPayload.last ?? Data()
+        }.withUnsafeBytes { $0.bindMemory(to: UInt64.self).baseAddress?.pointee } // $0.load(as: UInt64.self) }
+
+        guard let pointer = buffer.bindMemory(to: UInt8.self).baseAddress else { throw MessageError.formatError }
+//        let splitOptionPayload = buffer.load(fromByteOffset: 4 + Int(tokenLength), as: [UInt8].self).split(separator: 0xFF, maxSplits: 1).map { Data($0) }
+//        let options: MessageOptionSet = try splitOptionPayload.first?.withUnsafeBytes { try CoAPMessage.MessageOptionSet.with($0) } ?? []
+//        let payload: Data = splitOptionPayload.last ?? Data()
+        var offset = 4 + Int(tokenLength)
+        let maxOffset = buffer.count
+        var options: CoAPMessage.MessageOptionSet = []
+        try MessageOptionSet.parseOptions(parsing: pointer, startOffset: &offset, maxOffset: maxOffset, output: &options)
 
         return CoAPMessage(
             version: version,
             code: code,
             type: type,
             messageId: messageId,
-            token: token,
+            token: token!,
             options: options,
-            payload: payload
+            payload: Data()
         )
     }
 }
@@ -283,12 +289,13 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
     static func parseOptions(
         parsing bytes: UnsafePointer<UInt8>,
         startOffset offset: UnsafeMutablePointer<Int>,
+        maxOffset: Int,
         output: UnsafeMutablePointer<[CoAPMessage.MessageOption]>
     ) throws {
         var deltaLength = bytes.advanced(by: offset.pointee).pointee
         var lastDelta = 0
 
-        while deltaLength != 0xFF {
+        while deltaLength != 0xFF, offset.pointee < maxOffset {
             offset.pointee += 1
 
             var optionLength = Int(deltaLength & 0b1111)
@@ -298,8 +305,10 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
             optionLength = try Self.optionDeltaOrLengthValue(initialValue: optionLength, parsing: bytes, currentOffset: offset)
 
             // Here we should get the Option Number.
-            let optionNumber = optionDelta - lastDelta
-            let optionBody = bytes.advanced(by: offset.pointee).withMemoryRebound(to: Data.self, capacity: optionLength) { $0.pointee }
+            let optionNumber = optionDelta + lastDelta
+            let optionBody = bytes.advanced(by: offset.pointee).withMemoryRebound(to: UInt8.self, capacity: optionLength) { b in
+                Data(bytes: b, count: optionLength)
+            }
 
             guard let optionKey = CoAPMessage.MessageOptionKey(rawValue: UInt8(optionNumber)) else {
                 throw CoAPMessage.MessageError.formatError
@@ -308,7 +317,7 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
             output.pointee.append(CoAPMessage.MessageOption(key: optionKey, value: optionBody))
 
             // Prep for the next parse.
-            lastDelta = optionDelta
+            lastDelta += optionDelta
             offset.pointee += optionLength
 
             deltaLength = bytes.advanced(by: offset.pointee).pointee

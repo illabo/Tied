@@ -183,7 +183,19 @@ extension CoAPMessage: DataCodable {
     }
 }
 
+extension CoAPMessage {
+    static func createOptionsSet(_ options: [CoAPMessage.MessageOptionKey: Data]) -> CoAPMessage.MessageOptionSet {
+        CoAPMessage.MessageOptionSet(options)
+    }
+}
+
 extension CoAPMessage.MessageOptionSet: DataEncodable {
+    init(_ options: [CoAPMessage.MessageOptionKey: Data]) {
+        self = options.map {
+            CoAPMessage.MessageOption(key: $0.key, value: $0.value)
+        }
+    }
+
     func encode() -> Data {
         var lastDelta: UInt32 = 0
         var output = Data()

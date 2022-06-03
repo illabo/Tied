@@ -11,7 +11,11 @@ final class TiedTests: XCTestCase {
     }
 
     func testDataWithOptionsIsCorrect() throws {
-        let msg = CoAPMessage(code: .get, type: .confirmable, messageId: 0, token: 1, options: [.init(key: .ifNoneMatch, value: [5].withUnsafeBytes { Data($0) }), .init(key: .etag, value: [3].withUnsafeBytes { Data($0) }), .init(key: .observe, value: [10].withUnsafeBytes { Data($0) })])
+        let msg = CoAPMessage(code: .get, type: .confirmable, messageId: 0, token: 1, options: CoAPMessage.createOptionsSet([
+            .ifNoneMatch: [5].withUnsafeBytes { Data($0) },
+            .etag: [3].withUnsafeBytes { Data($0) },
+            .observe: [10].withUnsafeBytes { Data($0) },
+        ]))
 
         let data = try msg.encode()
 

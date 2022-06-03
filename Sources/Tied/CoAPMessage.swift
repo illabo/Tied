@@ -261,31 +261,6 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
         return (0, Data())
     }
 
-    static func parseOptionHeaderLength(optionHeaderByte byte: UInt8) throws -> Int {
-        var headerLength = 1 // As we already have 1 byte with non-extended delta and length
-        let optionLength = byte & 0b1111
-        let optionDelta = byte >> 4
-        if optionDelta == Self.extendTo8bitIndicator {
-            headerLength += 1
-        }
-        if optionDelta == Self.extendTo16bitIndicator {
-            headerLength += 2
-        }
-        if optionDelta > Self.extendTo16bitIndicator {
-            throw CoAPMessage.MessageError.formatError
-        }
-        if optionLength == Self.extendTo8bitIndicator {
-            headerLength += 1
-        }
-        if optionLength == Self.extendTo16bitIndicator {
-            headerLength += 2
-        }
-        if optionLength > Self.extendTo16bitIndicator {
-            throw CoAPMessage.MessageError.formatError
-        }
-        return headerLength
-    }
-
     static func parseOptions(
         parsing bytes: UnsafePointer<UInt8>,
         startOffset offset: UnsafeMutablePointer<Int>,

@@ -133,6 +133,7 @@ extension CoAPMessage: DataCodable {
         return output
     }
 
+    // Decode actually.
     static func with(_ buffer: UnsafeRawBufferPointer) throws -> CoAPMessage {
         let firstByte = buffer.load(fromByteOffset: 0, as: UInt8.self)
         let tokenLength = firstByte & 0b0000_1111
@@ -182,7 +183,7 @@ extension CoAPMessage: DataCodable {
     }
 }
 
-extension CoAPMessage.MessageOptionSet: DataCodable {
+extension CoAPMessage.MessageOptionSet: DataEncodable {
     func encode() -> Data {
         var lastDelta: UInt32 = 0
         var output = Data()
@@ -204,10 +205,6 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
             }
 
         return output
-    }
-
-    static func with(_ buffer: UnsafeRawBufferPointer) throws -> Self {
-        buffer.load(as: CoAPMessage.MessageOptionSet.self)
     }
 
     private static let extendTo8bitIndicator: UInt4 = 13
@@ -235,44 +232,6 @@ extension CoAPMessage.MessageOptionSet: DataCodable {
             )
         }
         return (0, Data())
-    }
-
-    static func seekSeparatorIndex(in bytes: [UInt8]) -> Int {
-        var skipping = 0
-        bytes.enumerated().forEach { enumeratedBytes in
-            let offset = enumeratedBytes.offset
-
-            // Check only currently awaited delta and length byte
-            if offset != skipping { return }
-            if offset == skipping, enumeratedBytes.element == 0xFF { return }
-
-            let byte = bytes[offset]
-            let length = byte & 0b1111
-            let delta = byte >> 4
-
-            skipping += 1
-            var skipExtendedDelta = 0
-            if delta == Self.extendTo8bitIndicator {
-                skipExtendedDelta = 1
-                skipping += 1
-            }
-            if delta == Self.extendTo16bitIndicator {
-                skipExtendedDelta = 2
-                skipping += 2
-            }
-            if length < Self.extendTo8bitIndicator {
-                skipping += Int(length)
-            }
-            if length == Self.extendTo8bitIndicator {
-                let lengthByte = bytes[offset + 1 + skipExtendedDelta]
-                skipping += (1 + Int(Self.extendTo8bitIndicator) + Int(lengthByte))
-            }
-            if length == Self.extendTo16bitIndicator {
-                let lengthByte = UInt16(bytes[offset + 1 + skipExtendedDelta] | bytes[offset + 2 + skipExtendedDelta])
-                skipping += (1 + Int(Self.extendTo16bitIndicator) + Int(lengthByte))
-            }
-        }
-        return skipping
     }
 
     static func parseOptionHeaderLength(optionHeaderByte byte: UInt8) throws -> Int {

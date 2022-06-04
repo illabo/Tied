@@ -25,7 +25,7 @@ public class CoAPClient {
     }
 
     class Connection {
-        internal init(settings: Settings) {
+        public init(settings: Settings) {
             networkConnection = NWConnection(to: settings.endpoint, using: Self.mustGetParameters(with: settings))
             messagePublisher = ConnectionMessagesPublisher()
             timestamp = Date().timeIntervalSince1970
@@ -55,7 +55,7 @@ public class CoAPClient {
         let security: Security?
 
         public struct Security {
-            internal init(psk: Data, pskHint: String = "", cipherSuite: SSLCipherSuite = TLS_PSK_WITH_AES_128_GCM_SHA256) {
+            public init(psk: Data, pskHint: String = "", cipherSuite: SSLCipherSuite = TLS_PSK_WITH_AES_128_GCM_SHA256) {
                 self.psk = psk
                 self.pskHint = pskHint
                 self.cipherSuite = cipherSuite

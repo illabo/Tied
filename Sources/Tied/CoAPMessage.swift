@@ -17,7 +17,7 @@ protocol DataDecodable {
     static func with(_ buffer: UnsafeRawBufferPointer) throws -> Self
 }
 
-protocol MessageCode {
+public protocol MessageCode {
     var rawValue: UInt8? { get }
 }
 
@@ -32,7 +32,7 @@ func == (lhs: MessageCode, rhs: MessageCode) -> Bool {
 typealias DataCodable = DataEncodable & DataDecodable
 
 public struct CoAPMessage {
-    internal init(
+    public init(
         version: CoAPMessage.Version = .v1,
         code: MessageCode,
         type: CoAPMessage.MessageType,
@@ -51,7 +51,7 @@ public struct CoAPMessage {
     }
 
     // Additional init to have the type hint for `MessageCode`.
-    internal init(
+    public init(
         code: Code.Method,
         type: CoAPMessage.MessageType,
         messageId: UInt16,
@@ -63,7 +63,7 @@ public struct CoAPMessage {
     }
 
     // Additional init to have the type hint for `MessageCode`.
-    internal init(
+    public init(
         code: Code.Response,
         type: CoAPMessage.MessageType,
         messageId: UInt16,
@@ -261,7 +261,7 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
         return (0, Data())
     }
 
-    static func parseOptions(
+    fileprivate static func parseOptions(
         parsing bytes: UnsafePointer<UInt8>,
         startOffset offset: UnsafeMutablePointer<Int>,
         maxOffset: Int,
@@ -517,7 +517,7 @@ public extension CoAPMessage {
     }
 
     // Yes, it's not a Set but set in common sense.
-    internal typealias MessageOptionSet = [MessageOption]
+    typealias MessageOptionSet = [MessageOption]
 }
 
 private extension UInt32 {

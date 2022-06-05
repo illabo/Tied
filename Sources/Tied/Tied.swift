@@ -84,7 +84,7 @@ extension Tied.Connection {
 
     private func doReads() {
         guard networkConnection.state == .ready else { return }
-        networkConnection.receiveMessage { [weak self] completeContent, contentContext, _, error in
+        networkConnection.receiveMessage { [weak self] completeContent, _, _, error in
             guard let self = self else { return }
 
             self.timestamp = Date().timeIntervalSince1970
@@ -94,15 +94,9 @@ extension Tied.Connection {
                 self.networkConnection.cancel()
                 return
             }
-//            if let message = completeContent {
-//                self.messagePublisher.send(CoAPMessage(token: 0, payload: message, observe: false))
-//            }
 
-            if let message = contentContext?.protocolMetadata(definition: CoAPProtocol.definition) as? NWProtocolFramer.Message,
-               let content = completeContent
-            {
-                // TODO: Have to move the most of CoAP message parsing to NWProtocolFramer.Message.
-//                self.messagePublisher.send(CoAPMessage(token: 0, payload: content, metadata: message, observe: false))
+            if let data = completeContent, let message = try? CoAPMessage.with(data.withUnsafeBytes { $0 }) {
+                self.messagePublisher.send(message)
             }
 
             self.doReads()
@@ -115,8 +109,6 @@ extension Tied.Connection {
             parameters = NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
         }
         parameters = .udp
-        let framerOptions = NWProtocolFramer.Options(definition: CoAPProtocol.definition)
-        parameters.defaultProtocolStack.applicationProtocols.insert(framerOptions, at: 0)
         return parameters
     }
 
@@ -154,7 +146,7 @@ extension Tied.Connection {
     }
 
     func stopSession(for token: UInt64) {
-        // Send 'stop message'
+        // Send 'stop message' for token.
         // performMessageSend()
         print(token)
     }

@@ -12,20 +12,13 @@ import os.log
 
 typealias ConnectionMessagesPublisher = PassthroughSubject<CoAPMessage, Error>
 
-public class CoAPClient {
-    private var connections: [NWEndpoint: Connection] = [:]
-
-    // some func to send message.
-
-    private func mustGetConnection(with settings: Settings) -> Connection {
-        if let connection = connections[settings.endpoint] {
-            return connection
-        }
-        return Connection(settings: settings)
+public struct Tied {
+    public static func newConnection(with settings: Settings) -> Connection {
+        Connection(settings: settings)
     }
 
-    class Connection {
-        public init(settings: Settings) {
+    public class Connection {
+        fileprivate init(settings: Settings) {
             networkConnection = NWConnection(to: settings.endpoint, using: Self.mustGetParameters(with: settings))
             messagePublisher = ConnectionMessagesPublisher()
             timestamp = Date().timeIntervalSince1970
@@ -68,7 +61,7 @@ public class CoAPClient {
     }
 }
 
-extension CoAPClient.Connection {
+extension Tied.Connection {
     private func setupPublisher() {
         networkConnection.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
@@ -108,6 +101,7 @@ extension CoAPClient.Connection {
             if let message = contentContext?.protocolMetadata(definition: CoAPProtocol.definition) as? NWProtocolFramer.Message,
                let content = completeContent
             {
+                // TODO: Have to move the most of CoAP message parsing to NWProtocolFramer.Message.
 //                self.messagePublisher.send(CoAPMessage(token: 0, payload: content, metadata: message, observe: false))
             }
 
@@ -115,7 +109,7 @@ extension CoAPClient.Connection {
         }
     }
 
-    private static func mustGetParameters(with settings: CoAPClient.Settings) -> NWParameters {
+    private static func mustGetParameters(with settings: Tied.Settings) -> NWParameters {
         var parameters: NWParameters
         if let security = settings.security {
             parameters = NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
@@ -126,7 +120,7 @@ extension CoAPClient.Connection {
         return parameters
     }
 
-    private static func tlsWithPSKOptions(_ security: CoAPClient.Settings.Security) -> NWProtocolTLS.Options {
+    private static func tlsWithPSKOptions(_ security: Tied.Settings.Security) -> NWProtocolTLS.Options {
         let tlsOptions = NWProtocolTLS.Options()
         let key = security.psk.withUnsafeBytes { DispatchData(bytes: $0) }
         let hint = security.pskHint.data(using: .utf8)!.withUnsafeBytes { DispatchData(bytes: $0) }
@@ -135,7 +129,7 @@ extension CoAPClient.Connection {
         return tlsOptions
     }
 
-    private static func pingTimer(with settings: CoAPClient.Settings, handler: @escaping (_ timer: Timer) -> Void) -> Timer? {
+    private static func pingTimer(with settings: Tied.Settings, handler: @escaping (_ timer: Timer) -> Void) -> Timer? {
         if settings.pingEvery == 0 { return nil }
         return Timer(timeInterval: TimeInterval(settings.pingEvery), repeats: true) { timer in
             handler(timer)
@@ -143,9 +137,15 @@ extension CoAPClient.Connection {
     }
 }
 
-extension CoAPClient.Connection {
-    func sendMessage(_ message: CoAPMessage) {
-        networkConnection.send(content: try! message.encode(), completion: .contentProcessed { [weak self] error in
+extension Tied.Connection {
+    public func sendMessage(_ message: CoAPMessage) -> CoAPMessagePublisher {
+        CoAPMessagePublisher(connection: self, outgoingMessage: message)
+    }
+
+    // It is the method used internally. Called from MessageSubscription class upon setup
+    // for message session publisher is done.
+    func performMessageSend(_ message: CoAPMessage) {
+        networkConnection.send(content: try? message.encode(), completion: .contentProcessed { [weak self] error in
             guard let self = self else { return }
             if let error = error {
                 self.messagePublisher.send(completion: .failure(error))
@@ -153,8 +153,10 @@ extension CoAPClient.Connection {
         })
     }
 
-    func stopSession(for _: UInt64) {
-        // Send 'stop message' and remove token from allowed list.
+    func stopSession(for token: UInt64) {
+        // Send 'stop message'
+        // performMessageSend()
+        print(token)
     }
 
     func cancel() {

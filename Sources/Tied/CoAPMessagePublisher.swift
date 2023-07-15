@@ -65,3 +65,15 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         subscriber = nil
     }
 }
+
+extension MessageSubscription {
+    static func isObserve(outgoingMessage: CoAPMessage)->Bool{
+        guard let observeOption = outgoingMessage.options.first(where: { $0.key == .observe })?.value else { return false }
+        return true
+    }
+    static func areMoreBlocksExpected(incomingMessage: CoAPMessage)->Bool{
+        guard let block2Option = incomingMessage.options.first(where: {$0.key == .block2})?.value,
+              let lastByte = block2Option.withUnsafeBytes({$0.last}) else { return false }
+        return (lastByte >> 3) & 0b1 == 1
+    }
+}

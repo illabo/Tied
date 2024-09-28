@@ -16,7 +16,7 @@ public struct Tied {
     public static func newConnection(with settings: Settings) -> Connection {
         Connection(settings: settings)
     }
-
+    
     public class Connection {
         fileprivate init(settings: Settings) {
             networkConnection = NWConnection(to: settings.endpoint, using: Self.mustGetParameters(with: settings))
@@ -32,28 +32,28 @@ public struct Tied {
                 })
                 timer.fireDate = Date().addingTimeInterval(TimeInterval(settings.pingEvery))
             }
-
+            
             setupPublisher()
         }
-
+        
         let messagePublisher: ConnectionMessagesPublisher
         private let networkConnection: NWConnection
         private var timestamp: TimeInterval
         private var pingTimer: Timer?
     }
-
+    
     public struct Settings {
         let endpoint: NWEndpoint
         let pingEvery: Int // Seconds
         let security: Security?
-
+        
         public struct Security {
             public init(psk: Data, pskHint: String = "", cipherSuite: SSLCipherSuite = TLS_PSK_WITH_AES_128_GCM_SHA256) {
                 self.psk = psk
                 self.pskHint = pskHint
                 self.cipherSuite = cipherSuite
             }
-
+            
             let psk: Data
             let pskHint: String
             let cipherSuite: SSLCipherSuite // Adds ciphersuite but doesn't guarantee its use
@@ -81,28 +81,28 @@ extension Tied.Connection {
         }
         networkConnection.start(queue: DispatchQueue.global(qos: .default))
     }
-
+    
     private func doReads() {
         guard networkConnection.state == .ready else { return }
         networkConnection.receiveMessage { [weak self] completeContent, _, _, error in
             guard let self = self else { return }
-
+            
             self.timestamp = Date().timeIntervalSince1970
-
+            
             if let error = error {
                 self.messagePublisher.send(completion: .failure(error))
                 self.networkConnection.cancel()
                 return
             }
-
+            
             if let data = completeContent, let message = try? CoAPMessage.with(data.withUnsafeBytes { $0 }) {
                 self.messagePublisher.send(message)
             }
-
+            
             self.doReads()
         }
     }
-
+    
     private static func mustGetParameters(with settings: Tied.Settings) -> NWParameters {
         var parameters: NWParameters
         if let security = settings.security {
@@ -111,7 +111,7 @@ extension Tied.Connection {
         parameters = .udp
         return parameters
     }
-
+    
     private static func tlsWithPSKOptions(_ security: Tied.Settings.Security) -> NWProtocolTLS.Options {
         let tlsOptions = NWProtocolTLS.Options()
         let key = security.psk.withUnsafeBytes { DispatchData(bytes: $0) }
@@ -120,7 +120,7 @@ extension Tied.Connection {
         sec_protocol_options_append_tls_ciphersuite(tlsOptions.securityProtocolOptions, tls_ciphersuite_t(rawValue: UInt16(security.cipherSuite))!)
         return tlsOptions
     }
-
+    
     private static func pingTimer(with settings: Tied.Settings, handler: @escaping (_ timer: Timer) -> Void) -> Timer? {
         if settings.pingEvery == 0 { return nil }
         return Timer(timeInterval: TimeInterval(settings.pingEvery), repeats: true) { timer in
@@ -133,8 +133,15 @@ extension Tied.Connection {
     /// Sane defaults for effortless message sends.
     public func sendMessage(method: CoAPMessage.Code.Method = .get,
                             type: CoAPMessage.MessageType = .confirmable,
-                            options: CoAPMessage.MessageOptionSet = [],
+                            observe: Bool = false,
+                            path: String? = nil,
                             payload: Data) -> CoAPMessagePublisher {
+        let options: CoAPMessage.MessageOptionSet = [
+            observe == false ? nil : CoAPMessage.MessageOption(key: .observe, value: try! UInt8(0).into()),
+            path?.isEmpty ?? true ? nil : CoAPMessage.MessageOption(key: .uriPath, value: path!.data(using: .utf8) ?? Data()),
+        ]
+            .compactMap{ $0 }
+        
         let message = CoAPMessage(code: method, type: type, messageId: randomUnsigned(), token: randomUnsigned(), options: options, payload: payload)
         return sendMessage(message)
     }
@@ -143,7 +150,7 @@ extension Tied.Connection {
     public func sendMessage(_ message: CoAPMessage) -> CoAPMessagePublisher {
         CoAPMessagePublisher(connection: self, outgoingMessage: message)
     }
-
+    
     // It is the method used internally. Called from MessageSubscription class upon setup,
     // sending ACKs or when message session publisher is done.
     func performMessageSend(_ message: CoAPMessage) {
@@ -154,7 +161,7 @@ extension Tied.Connection {
             }
         })
     }
-
+    
     func stopSession(for token: UInt64) {
         // Message to unsubscribe observer from resource.
         let message = CoAPMessage(code: .get,
@@ -165,16 +172,16 @@ extension Tied.Connection {
                                   payload: Data())
         performMessageSend(message)
     }
-
+    
     func cancel() {
         messagePublisher.send(completion: .finished)
         networkConnection.cancel()
     }
     
     private func randomUnsigned<U>() -> U where U: UnsignedInteger, U: FixedWidthInteger {
-            let byteCount = U.self.bitWidth / UInt8.bitWidth
+        let byteCount = U.self.bitWidth / UInt8.bitWidth
         var randomBytes = Data(count: byteCount)
-
+        
         withUnsafeMutableBytes(of: &randomBytes) { pointer in
             guard let baseAddress = pointer.baseAddress else { return }
             _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, baseAddress)

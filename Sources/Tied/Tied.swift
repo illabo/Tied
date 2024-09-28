@@ -65,7 +65,7 @@ extension Tied.Connection {
     private func setupPublisher() {
         networkConnection.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
-            os_log("Connection to %@ state %@", log: .default, type: .debug, self.networkConnection.endpoint.debugDescription, "\(state)")
+            os_log("Connection to %@ is %@", log: .default, type: .debug, self.networkConnection.endpoint.debugDescription, "\(state)")
             switch state {
             case .ready:
                 self.doReads()
@@ -106,7 +106,7 @@ extension Tied.Connection {
     private static func mustGetParameters(with settings: Tied.Settings) -> NWParameters {
         var parameters: NWParameters
         if let security = settings.security {
-            parameters = NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
+            return NWParameters(dtls: tlsWithPSKOptions(security), udp: NWProtocolUDP.Options())
         }
         parameters = .udp
         return parameters
@@ -130,12 +130,22 @@ extension Tied.Connection {
 }
 
 extension Tied.Connection {
+    /// Sane defaults for effortless message sends.
+    public func sendMessage(method: CoAPMessage.Code.Method = .get,
+                            type: CoAPMessage.MessageType = .confirmable,
+                            options: CoAPMessage.MessageOptionSet = [],
+                            payload: Data) -> CoAPMessagePublisher {
+        let message = CoAPMessage(code: method, type: type, messageId: randomUnsigned(), token: randomUnsigned(), options: options, payload: payload)
+        return sendMessage(message)
+    }
+    
+    /// More raw access to `CoAPMessage` type allowing going almost full manual.
     public func sendMessage(_ message: CoAPMessage) -> CoAPMessagePublisher {
         CoAPMessagePublisher(connection: self, outgoingMessage: message)
     }
 
-    // It is the method used internally. Called from MessageSubscription class upon setup
-    // for message session publisher is done.
+    // It is the method used internally. Called from MessageSubscription class upon setup,
+    // sending ACKs or when message session publisher is done.
     func performMessageSend(_ message: CoAPMessage) {
         networkConnection.send(content: try? message.encode(), completion: .contentProcessed { [weak self] error in
             guard let self = self else { return }
@@ -146,13 +156,33 @@ extension Tied.Connection {
     }
 
     func stopSession(for token: UInt64) {
-        // Send 'stop message' for token.
-        // performMessageSend()
-        print(token)
+        // Message to unsubscribe observer from resource.
+        let message = CoAPMessage(code: .get,
+                                  type: .nonconfirmable,
+                                  messageId: randomUnsigned(),
+                                  token: token,
+                                  options: [.init(key: .observe, value: try! UInt8(1).into())],
+                                  payload: Data())
+        performMessageSend(message)
     }
 
     func cancel() {
         messagePublisher.send(completion: .finished)
         networkConnection.cancel()
     }
+    
+    private func randomUnsigned<U>() -> U where U: UnsignedInteger, U: FixedWidthInteger {
+            let byteCount = U.self.bitWidth / UInt8.bitWidth
+        var randomBytes = Data(count: byteCount)
+
+        withUnsafeMutableBytes(of: &randomBytes) { pointer in
+            guard let baseAddress = pointer.baseAddress else { return }
+            _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, baseAddress)
+        }
+        
+        return randomBytes.withUnsafeBytes {
+            $0.load(as: U.self)
+        }
+    }
 }
+

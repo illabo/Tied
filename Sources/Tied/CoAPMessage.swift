@@ -98,7 +98,7 @@ extension CoAPMessage: DataCodable {
 
         // Message format per RFC 7252:
         //
-        //  0                   1                   2                   3
+        //  0               1               2               3
         //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
         // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         // |Ver| T |  TKL  |      Code     |          Message ID           |
@@ -180,6 +180,18 @@ extension CoAPMessage: DataCodable {
             options: options,
             payload: payload
         )
+    }
+}
+
+extension CoAPMessage: Equatable {
+    public static func == (lhs: CoAPMessage, rhs: CoAPMessage) -> Bool {
+        lhs.version == rhs.version &&
+        lhs.code == rhs.code &&
+        lhs.type == rhs.type &&
+        lhs.messageId == rhs.messageId &&
+        lhs.token == rhs.token &&
+        lhs.options == rhs.options &&
+        lhs.payload == rhs.payload
     }
 }
 

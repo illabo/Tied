@@ -8,6 +8,8 @@
 import Combine
 import Foundation
 
+public typealias MessagePayloadRepublisher = AnyPublisher<Data, Error>
+
 public struct CoAPMessagePublisher: Publisher {
     internal init(connection: Tied.Connection, outgoingMessage: CoAPMessage) {
         self.connection = connection
@@ -29,21 +31,51 @@ public struct CoAPMessagePublisher: Publisher {
             )
         )
     }
+    
+    /// This method returning `MessagePayloadRepublisher` extracts payloads from `CoAPMessage`s
+    /// and also removes the burden of joining block2 payloads by consumer.
+    public func republishPayloads() -> MessagePayloadRepublisher {
+        scan([CoAPMessage]()) { (acc: [CoAPMessage], message: CoAPMessage) -> [CoAPMessage] in
+            var acc = acc
+            acc.append(message)
+            return acc
+        }
+        .filter { (messages: [CoAPMessage]) -> Bool in
+            messages.last?.areMoreBlocksExpected ?? true == false
+        }
+        .map { (messages: [CoAPMessage]) -> Data in
+            messages.map(\.payload).reduce(into: Data(), +=)
+        }
+        .eraseToAnyPublisher()
+    }
+    
+    /// To directly cast the messages into consumer target type use this method.
+    public func castingPayloads<TargetType>(with handler: @escaping (Data) -> TargetType) -> AnyPublisher<TargetType, Error> {
+        republishPayloads()
+            .map(handler)
+            .eraseToAnyPublisher()
+    }
 }
 
 private final class MessageSubscription<S: Subscriber>: Subscription where S.Input == CoAPMessagePublisher.Output, S.Failure == CoAPMessagePublisher.Failure {
     internal init(subscriber: S, connection: Tied.Connection, outgoingMessage: CoAPMessage) {
+        self.outgoingMessage = outgoingMessage
         self.subscriber = subscriber
         self.connection = connection
-        token = outgoingMessage.token
         connection.messagePublisher
-            .filter { $0.token == self.token }
+            .filter { $0.token == outgoingMessage.token }
+            .removeDuplicates()
             .sink { [weak self] completion in
                 self?.subscriber?.receive(completion: completion)
             } receiveValue: { [weak self] message in
                 _ = self?.subscriber?.receive(message)
-                // If message has no observe option it is meant to be replied once.
-                if outgoingMessage.options.contains(where: { $0.key == .observe }) == false {
+                // If the message from server is CON we have to reply with ACK.
+                if message.type == .confirmable {
+                    self?.connection?.performMessageSend(message.prepareAcknowledgement())
+                }
+                // If message has no observe option it is meant to be replied once so
+                // if no more blocks expected we could stop waiting for more messages.
+                if outgoingMessage.isObserve == false && message.areMoreBlocksExpected == false {
                     self?.subscriber?.receive(completion: .finished)
                     self?.cancel()
                 }
@@ -52,7 +84,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         connection.performMessageSend(outgoingMessage)
     }
 
-    private let token: UInt64
+    private let outgoingMessage: CoAPMessage
     private var subscriber: S?
     private var connection: Tied.Connection?
     private var subscriptions = Set<AnyCancellable>()
@@ -60,20 +92,29 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
     func request(_: Subscribers.Demand) {}
 
     func cancel() {
-        connection?.stopSession(for: token)
+        if outgoingMessage.isObserve {
+            connection?.stopSession(for: outgoingMessage.token)
+        }
         connection = nil
         subscriber = nil
     }
 }
 
-extension MessageSubscription {
-    static func isObserve(outgoingMessage: CoAPMessage)->Bool{
-        guard let observeOption = outgoingMessage.options.first(where: { $0.key == .observe })?.value else { return false }
-        return true
+private extension CoAPMessage {
+    /// Only applies to outgoing messages.
+    var isObserve: Bool {
+        self.options.contains(where: { $0.key == .observe && $0.value.into() == 0 })
     }
-    static func areMoreBlocksExpected(incomingMessage: CoAPMessage)->Bool{
-        guard let block2Option = incomingMessage.options.first(where: {$0.key == .block2})?.value,
+    
+    /// Only applies to incoming messages.
+    var areMoreBlocksExpected: Bool {
+        guard let block2Option = self.options.first(where: {$0.key == .block2})?.value,
               let lastByte = block2Option.withUnsafeBytes({$0.last}) else { return false }
         return (lastByte >> 3) & 0b1 == 1
+    }
+    
+    /// Create an ACK with original mesage ID.
+    func prepareAcknowledgement() -> CoAPMessage {
+        CoAPMessage(code: Code.empty, type: .acknowledgement, messageId: self.messageId, token: 0, options: [], payload: Data())
     }
 }

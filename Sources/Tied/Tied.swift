@@ -40,6 +40,7 @@ public struct Tied {
         private let networkConnection: NWConnection
         private var timestamp: TimeInterval
         private var pingTimer: Timer?
+        private var szx: Int = 6
     }
     
     public struct Settings {
@@ -102,6 +103,7 @@ extension Tied.Connection {
             }
             
             if let data = completeContent, let message = try? CoAPMessage.with(data.withUnsafeBytes { $0 }) {
+                self.szx = message.szx(.block2)
                 self.messagePublisher.send(message)
             }
             
@@ -199,3 +201,24 @@ extension Tied.Connection {
     }
 }
 
+private extension CoAPMessage {
+    // To limit option keys which could be passed to `func szx()`.
+    enum SZX: UInt8 {
+        case block1 = 27
+        case block2 = 23
+        
+        var option: MessageOptionKey {
+            MessageOptionKey(rawValue: self.rawValue)!
+        }
+    }
+    
+    func szx(_ block: CoAPMessage.SZX) -> Int {
+        // If no option set we are treating it as maximal size (6).
+        // SZX affects block size as 2^(SZX+4) meaning 0 is 16 bytes and 6 is 1024.
+        guard let option: UInt32 = self.options.first(where: {$0.key == block.option})?.value.into() else { return 6 }
+        return Int(option & 0b111)
+    }
+    
+    // Actual size 16 to 1024.
+    static func blockSize(szx: Int) -> Int { 1 << (szx + 4) }
+}

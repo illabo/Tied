@@ -117,8 +117,8 @@ private extension CoAPMessage {
     }
     
     var blockNumber: Int {
-        guard let block2Option: Int = self.options.first(where: {$0.key == .block2})?.value.into() else { return 0 }
-        return block2Option >> 4
+        guard let block2Option: UInt32 = self.options.first(where: {$0.key == .block2})?.value.into() else { return 0 }
+        return Int(block2Option >> 4)
     }
     
     /// Create an ACK with original mesage ID.

@@ -529,7 +529,7 @@ public extension CoAPMessage {
     }
 
     // Yes, it's not a Set but set in common sense.
-    public typealias MessageOptionSet = [MessageOption]
+    typealias MessageOptionSet = [MessageOption]
 }
 
 private extension UInt32 {

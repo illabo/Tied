@@ -12,7 +12,7 @@ This repo is currently 'Work in progress'. Started as a pastime project is platt
 
 ### Quickstart
 ```swift
-Tied.newConnection(with: Tied.Settings{ endpoint: endpoint, pingEvery: 0 })
+Tied.newConnection(with: Tied.Settings(endpoint: endpoint))
     .sendMessage(payload: "Cat piss or sauvignon blanc?".data(using: .utf8)!)
     .castingResponsePayloads { payload in
         String(data: payload, encoding: .utf8)

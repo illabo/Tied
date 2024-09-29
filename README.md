@@ -14,7 +14,7 @@ This repo is currently 'Work in progress'. Started as a pastime project is platt
 ```swift
 Tied.newConnection(with: Tied.Settings{ endpoint: endpoint, pingEvery: 0 })
     .sendMessage(payload: "Cat piss or sauvignon blanc?".data(using: .utf8)!)
-    .castingPayloads { payload in
+    .castingResponsePayloads { payload in
         String(data: payload, encoding: .utf8)
     }
 ```

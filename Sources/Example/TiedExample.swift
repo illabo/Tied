@@ -27,7 +27,7 @@ class TiedExample {
 
     func run() async {
         disposable = connection.sendMessage(method: .get, type: .confirmable, observe: true, path: "/hello_obs", payload: Data())
-            .castingPayloads { payload in
+            .castingResponsePayloads { payload in
                 String(data: payload, encoding: .utf8)
             }
             .sink { [weak self] completion in

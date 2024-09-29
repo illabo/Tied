@@ -12,25 +12,30 @@ public typealias MessagePayloadRepublisher = AnyPublisher<Data, Error>
 public typealias castingResponsePayloadsRepublisher<T> = AnyPublisher<T, Error>
 
 public struct CoAPMessagePublisher: Publisher {
-    internal init(connection: Tied.Connection, outgoingMessage: CoAPMessage) {
+    internal init(connection: Tied.Connection, outgoingMessages: CoAPMessage...) {
         self.connection = connection
-        message = outgoingMessage
+        messages = outgoingMessages
     }
 
     public typealias Output = CoAPMessage
     public typealias Failure = Error
 
     private let connection: Tied.Connection
-    private let message: CoAPMessage
+    private let messages: [CoAPMessage]
 
     public func receive<S>(subscriber: S) where S: Subscriber, Failure == S.Failure, Output == S.Input {
-        subscriber.receive(
-            subscription: MessageSubscription(
-                subscriber: subscriber,
-                connection: connection,
-                outgoingMessage: message
+        if let subscription = MessageSubscription(
+            subscriber: subscriber,
+            connection: connection,
+            outgoingMessages: messages
+        ) {
+            subscriber.receive(
+                subscription: subscription
             )
-        )
+        } else {
+            // If no messages to be sent complete immediately.
+            subscriber.receive(completion: .finished)
+        }
     }
     
     /// This method returning `MessagePayloadRepublisher` extracts payloads from `CoAPMessage`s
@@ -61,33 +66,62 @@ public struct CoAPMessagePublisher: Publisher {
 }
 
 private final class MessageSubscription<S: Subscriber>: Subscription where S.Input == CoAPMessagePublisher.Output, S.Failure == CoAPMessagePublisher.Failure {
-    internal init(subscriber: S, connection: Tied.Connection, outgoingMessage: CoAPMessage) {
-        self.outgoingMessage = outgoingMessage
+    internal init?(subscriber: S, connection: Tied.Connection, outgoingMessages: [CoAPMessage]) {
+        guard outgoingMessages.isEmpty == false else {
+            return nil
+        }
+        self.isObserve = outgoingMessages.first!.isObserve
+        self.token = outgoingMessages.first!.token
         self.subscriber = subscriber
         self.connection = connection
+        
+        var unsentMessages: [CoAPMessage] = outgoingMessages
+        
         connection.messagePublisher
-            .filter { $0.token == outgoingMessage.token }
+            .filter { $0.token == outgoingMessages.first!.token }
             .removeDuplicates()
             .sink { [weak self] completion in
                 self?.subscriber?.receive(completion: completion)
             } receiveValue: { [weak self] message in
-                _ = self?.subscriber?.receive(message)
                 // If the message from server is CON we have to reply with ACK.
                 if message.type == .confirmable {
                     self?.connection?.performMessageSend(message.prepareAcknowledgement())
                 }
+                // Remove from unsent messages the message acknowlidged.
+                if outgoingMessages.first!.type == .confirmable,
+                    message.type == .acknowledgement,
+                    let id = unsentMessages.first(where: { $0.messageId == message.messageId })?.messageId {
+                    unsentMessages.removeAll(where: { $0.messageId == id })
+                }
+                if message.type != .acknowledgement {
+                    _ = self?.subscriber?.receive(message)
+                }
                 // If message has no observe option it is meant to be replied once so
-                // if no more blocks expected we could stop waiting for more messages.
-                if outgoingMessage.isObserve == false && message.areMoreBlocksExpected == false {
+                // if no more blocks expected to be recieved or sent we could stop waiting for more messages.
+                if outgoingMessages.first!.isObserve == false && 
+                    message.areMoreBlocksExpected == false &&
+                    unsentMessages.isEmpty
+                {
                     self?.subscriber?.receive(completion: .finished)
                     self?.cancel()
                 }
             }
             .store(in: &subscriptions)
-        connection.performMessageSend(outgoingMessage)
+        
+        Timer.TimerPublisher(interval: 1, runLoop: .main, mode: .common).autoconnect()
+            .sink { _ in
+                if unsentMessages.first?.type == .confirmable, let next = unsentMessages.first {
+                    connection.performMessageSend(next)
+                }
+                if unsentMessages.isEmpty == false, unsentMessages.first?.type != .confirmable {
+                    connection.performMessageSend(unsentMessages.removeFirst())
+                }
+            }
+            .store(in: &subscriptions)
     }
 
-    private let outgoingMessage: CoAPMessage
+    private let isObserve: Bool
+    private let token: UInt64
     private var subscriber: S?
     private var connection: Tied.Connection?
     private var subscriptions = Set<AnyCancellable>()
@@ -95,9 +129,13 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
     func request(_: Subscribers.Demand) {}
 
     func cancel() {
-        if outgoingMessage.isObserve {
-            connection?.stopSession(for: outgoingMessage.token)
+        if self.isObserve {
+            connection?.stopSession(for: self.token)
         }
+        subscriptions.forEach { subscription in
+            subscription.cancel()
+        }
+        subscriptions.removeAll()
         connection = nil
         subscriber = nil
     }

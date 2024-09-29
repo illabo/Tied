@@ -26,7 +26,7 @@ class TiedExample {
     }
 
     func run() async {
-        disposable = connection.sendMessage(method: .get, type: .confirmable, observe: true, path: "/hello_obs", payload: Data())
+        disposable = connection.sendMessage(method: .get, type: .nonconfirmable, observe: true, path: "/hello_obs", payload: Data())
             .castingResponsePayloads { payload in
                 String(data: payload, encoding: .utf8)
             }

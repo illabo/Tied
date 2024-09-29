@@ -156,7 +156,7 @@ extension Tied.Connection {
     
     /// More raw access to `CoAPMessage` type allowing going almost full manual.
     public func sendMessage(_ message: CoAPMessage) -> CoAPMessagePublisher {
-        CoAPMessagePublisher(connection: self, outgoingMessage: message)
+        CoAPMessagePublisher(connection: self, outgoingMessages: message)
     }
     
     // It is the method used internally. Called from MessageSubscription class upon setup,

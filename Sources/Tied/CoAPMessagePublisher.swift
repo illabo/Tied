@@ -9,6 +9,7 @@ import Combine
 import Foundation
 
 public typealias MessagePayloadRepublisher = AnyPublisher<Data, Error>
+public typealias CastingPayloadsRepublisher<T> = AnyPublisher<T, Error>
 
 public struct CoAPMessagePublisher: Publisher {
     internal init(connection: Tied.Connection, outgoingMessage: CoAPMessage) {
@@ -35,22 +36,24 @@ public struct CoAPMessagePublisher: Publisher {
     /// This method returning `MessagePayloadRepublisher` extracts payloads from `CoAPMessage`s
     /// and also removes the burden of joining block2 payloads by consumer.
     public func republishPayloads() -> MessagePayloadRepublisher {
-        scan([CoAPMessage]()) { (acc: [CoAPMessage], message: CoAPMessage) -> [CoAPMessage] in
-            var acc = acc
+        scan(([CoAPMessage](), false)) { (partial: ([CoAPMessage], Bool), message: CoAPMessage) -> ([CoAPMessage], Bool) in
+            var (acc, ready) = partial
+            if ready { acc = [] }
             acc.append(message)
-            return acc
+            ready = message.areMoreBlocksExpected == false
+            return (acc, ready)
         }
-        .filter { (messages: [CoAPMessage]) -> Bool in
-            messages.last?.areMoreBlocksExpected ?? true == false
+        .filter { (_: [CoAPMessage], ready: Bool) -> Bool in
+            ready
         }
-        .map { (messages: [CoAPMessage]) -> Data in
+        .map { (messages: [CoAPMessage], ready: _) -> Data in
             messages.map(\.payload).reduce(into: Data(), +=)
         }
         .eraseToAnyPublisher()
     }
     
     /// To directly cast the messages into consumer target type use this method.
-    public func castingPayloads<TargetType>(with handler: @escaping (Data) -> TargetType) -> AnyPublisher<TargetType, Error> {
+    public func castingPayloads<TargetType>(with handler: @escaping (Data) -> TargetType) -> CastingPayloadsRepublisher<TargetType> {
         republishPayloads()
             .map(handler)
             .eraseToAnyPublisher()

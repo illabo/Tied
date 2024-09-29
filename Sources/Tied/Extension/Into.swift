@@ -22,7 +22,7 @@ extension Into {
         var mutSelf = self
         
         let result: T? = withUnsafePointer(to: &mutSelf) { pointer in
-            var raw = UnsafeMutableRawPointer(mutating: pointer)
+            let raw = UnsafeMutableRawPointer(mutating: pointer)
             return raw.bindMemory(to: type, capacity: MemoryLayout<T>.size).pointee
         }
         

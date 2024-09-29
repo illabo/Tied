@@ -43,9 +43,15 @@ public struct Tied {
     }
     
     public struct Settings {
-        let endpoint: NWEndpoint
-        let pingEvery: Int // Seconds
-        let security: Security?
+        public let endpoint: NWEndpoint
+        public let pingEvery: Int // Seconds
+        public let security: Security?
+        
+        public init(endpoint: NWEndpoint, pingEvery: Int = 0, security: Security? = nil) {
+            self.endpoint = endpoint
+            self.pingEvery = pingEvery
+            self.security = security
+        }
         
         public struct Security {
             public init(psk: Data, pskHint: String = "", cipherSuite: SSLCipherSuite = TLS_PSK_WITH_AES_128_GCM_SHA256) {
@@ -65,7 +71,7 @@ extension Tied.Connection {
     private func setupPublisher() {
         networkConnection.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
-            os_log("Connection to %@ is %@", log: .default, type: .debug, self.networkConnection.endpoint.debugDescription, "\(state)")
+            os_log("Connection to %{public}@ is %{public}@", log: .default, type: .debug, self.networkConnection.endpoint.debugDescription, "\(state)")
             switch state {
             case .ready:
                 self.doReads()

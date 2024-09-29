@@ -30,5 +30,9 @@ let package = Package(
             name: "TiedTests",
             dependencies: ["Tied"]
         ),
+        .executableTarget(
+            name: "Example",
+            dependencies: ["Tied"]
+        )
     ]
 )

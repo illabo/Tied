@@ -41,7 +41,7 @@ public struct CoAPMessagePublisher: Publisher {
             if ready { acc = [] }
             acc.append(message)
             ready = message.areMoreBlocksExpected == false
-            return (acc, ready)
+            return (acc.sorted(by: { $0.blockNumber < $1.blockNumber }), ready)
         }
         .filter { (_: [CoAPMessage], ready: Bool) -> Bool in
             ready
@@ -114,6 +114,11 @@ private extension CoAPMessage {
         guard let block2Option = self.options.first(where: {$0.key == .block2})?.value,
               let lastByte = block2Option.withUnsafeBytes({$0.last}) else { return false }
         return (lastByte >> 3) & 0b1 == 1
+    }
+    
+    var blockNumber: Int {
+        guard let block2Option: Int = self.options.first(where: {$0.key == .block2})?.value.into() else { return 0 }
+        return block2Option >> 4
     }
     
     /// Create an ACK with original mesage ID.

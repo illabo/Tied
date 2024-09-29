@@ -1,6 +1,6 @@
 <p align="center">
 <img src="Sources/Resources/TiedIcon.webp" alt="Tied Icon" title="Tied" height="250"/><br>
-<font size="15">Tied</font>
+<font size="20">Tied</font>
 </p>
 
 ---

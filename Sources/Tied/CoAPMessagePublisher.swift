@@ -9,20 +9,20 @@ import Combine
 import Foundation
 
 public typealias MessagePayloadRepublisher = AnyPublisher<Data, Error>
-public typealias castingResponsePayloadsRepublisher<T> = AnyPublisher<T, Error>
+public typealias CastingResponsePayloadsRepublisher<T> = AnyPublisher<T, Error>
 
 public struct CoAPMessagePublisher: Publisher {
     internal init(connection: Tied.Connection, outgoingMessages: CoAPMessage...) {
         self.connection = connection
         messages = outgoingMessages
     }
-
+    
     public typealias Output = CoAPMessage
     public typealias Failure = Error
-
+    
     private let connection: Tied.Connection
     private let messages: [CoAPMessage]
-
+    
     public func receive<S>(subscriber: S) where S: Subscriber, Failure == S.Failure, Output == S.Input {
         if let subscription = MessageSubscription(
             subscriber: subscriber,
@@ -45,7 +45,7 @@ public struct CoAPMessagePublisher: Publisher {
             var (acc, ready) = partial
             if ready { acc = [] }
             acc.append(message)
-            ready = message.areMoreBlocksExpected == false
+            ready = message.areMoreBlocksExpected(.block2) == false
             return (acc.sorted(by: { $0.blockNumber < $1.blockNumber }), ready)
         }
         .filter { (_: [CoAPMessage], ready: Bool) -> Bool in
@@ -58,7 +58,7 @@ public struct CoAPMessagePublisher: Publisher {
     }
     
     /// To directly cast the messages into consumer target type use this method.
-    public func castingResponsePayloads<TargetType>(with handler: @escaping (Data) -> TargetType) -> castingResponsePayloadsRepublisher<TargetType> {
+    public func castingResponsePayloads<TargetType>(with handler: @escaping (Data) -> TargetType) -> CastingResponsePayloadsRepublisher<TargetType> {
         republishResponsePayloads()
             .map(handler)
             .eraseToAnyPublisher()
@@ -82,24 +82,45 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
             .removeDuplicates()
             .sink { [weak self] completion in
                 self?.subscriber?.receive(completion: completion)
+                self?.cancel()
             } receiveValue: { [weak self] message in
                 // If the message from server is CON we have to reply with ACK.
                 if message.type == .confirmable {
                     self?.connection?.performMessageSend(message.prepareAcknowledgement())
                 }
-                // Remove from unsent messages the message acknowlidged.
+                // Remove from unsent messages the message acknowledged.
                 if outgoingMessages.first!.type == .confirmable,
-                    message.type == .acknowledgement,
-                    let id = unsentMessages.first(where: { $0.messageId == message.messageId })?.messageId {
-                    unsentMessages.removeAll(where: { $0.messageId == id })
+                   message.type == .acknowledgement {
+                    if let id = unsentMessages.first(where: { $0.messageId == message.messageId })?.messageId {
+                        unsentMessages.removeAll(where: { $0.messageId == id })
+                    }
+                    // If it is just acknowlidgement with no content
+                    // we would wait for the message with content yet to come.
+                    if message.code == CoAPMessage.Code.empty {
+                        return
+                    }
                 }
-                if message.type != .acknowledgement {
-                    _ = self?.subscriber?.receive(message)
+                _ = self?.subscriber?.receive(message)
+                if message.areMoreBlocksExpected(.block2), let token = self?.token {
+                    unsentMessages.append(
+                        CoAPMessage(
+                            code: .get,
+                            type: .confirmable,
+                            messageId: randomUnsigned(),
+                            token: token,
+                            options: [
+                                CoAPMessage.MessageOption.blockOption(for: .block2,
+                                                                      num: message.blockNumber + 1,
+                                                                      more: false,
+                                                                      szx: message.szx(.block2)),
+                            ]
+                        )
+                    )
                 }
                 // If message has no observe option it is meant to be replied once so
-                // if no more blocks expected to be recieved or sent we could stop waiting for more messages.
-                if outgoingMessages.first!.isObserve == false && 
-                    message.areMoreBlocksExpected == false &&
+                // if no more blocks expected to be received or sent we could stop waiting for more messages.
+                if outgoingMessages.first!.isObserve == false &&
+                    message.areMoreBlocksExpected(.block2) == false &&
                     unsentMessages.isEmpty
                 {
                     self?.subscriber?.receive(completion: .finished)
@@ -119,15 +140,15 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
             }
             .store(in: &subscriptions)
     }
-
+    
     private let isObserve: Bool
     private let token: UInt64
     private var subscriber: S?
     private var connection: Tied.Connection?
     private var subscriptions = Set<AnyCancellable>()
-
+    
     func request(_: Subscribers.Demand) {}
-
+    
     func cancel() {
         if self.isObserve {
             connection?.stopSession(for: self.token)
@@ -141,26 +162,3 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
     }
 }
 
-private extension CoAPMessage {
-    /// Only applies to outgoing messages.
-    var isObserve: Bool {
-        self.options.contains(where: { $0.key == .observe && $0.value.into() == 0 })
-    }
-    
-    /// Only applies to incoming messages.
-    var areMoreBlocksExpected: Bool {
-        guard let block2Option = self.options.first(where: {$0.key == .block2})?.value,
-              let lastByte = block2Option.withUnsafeBytes({$0.last}) else { return false }
-        return (lastByte >> 3) & 0b1 == 1
-    }
-    
-    var blockNumber: Int {
-        guard let block2Option: UInt32 = self.options.first(where: {$0.key == .block2})?.value.into() else { return 0 }
-        return Int(block2Option >> 4)
-    }
-    
-    /// Create an ACK with original mesage ID.
-    func prepareAcknowledgement() -> CoAPMessage {
-        CoAPMessage(code: Code.empty, type: .acknowledgement, messageId: self.messageId, token: 0, options: [], payload: Data())
-    }
-}

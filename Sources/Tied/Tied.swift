@@ -8,6 +8,7 @@
 import Combine
 import Foundation
 import Network
+import UInt4
 import os.log
 
 typealias ConnectionMessagesPublisher = PassthroughSubject<CoAPMessage, Error>
@@ -24,6 +25,7 @@ public struct Tied {
             timestamp = Date().timeIntervalSince1970
             pingTimer = settings.pingEvery == 0 ? nil : Self.pingTimer(with: settings) { [weak self] timer in
                 guard let networkConnection = self?.networkConnection else { return }
+                // Should be self?.performMessageSend with CoAPMessage(code: Code.empty, type: .confirmable, messageId: try! randomUnsigned().into(), token: 0, options: [], payload: Data()).
                 networkConnection.send(content: Data(), completion: .contentProcessed { [weak self] error in
                     guard let self = self else { return }
                     if let error = error {
@@ -40,7 +42,7 @@ public struct Tied {
         private let networkConnection: NWConnection
         private var timestamp: TimeInterval
         private var pingTimer: Timer?
-        private var szx: Int = 6
+        private var szx: UInt4 = 6
     }
     
     public struct Settings {
@@ -185,40 +187,5 @@ extension Tied.Connection {
         messagePublisher.send(completion: .finished)
         networkConnection.cancel()
     }
-    
-    private func randomUnsigned<U>() -> U where U: UnsignedInteger, U: FixedWidthInteger {
-        let byteCount = U.self.bitWidth / UInt8.bitWidth
-        var randomBytes = Data(count: byteCount)
-        
-        withUnsafeMutableBytes(of: &randomBytes) { pointer in
-            guard let baseAddress = pointer.baseAddress else { return }
-            _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, baseAddress)
-        }
-        
-        return randomBytes.withUnsafeBytes {
-            $0.load(as: U.self)
-        }
-    }
 }
 
-private extension CoAPMessage {
-    // To limit option keys which could be passed to `func szx()`.
-    enum SZX: UInt8 {
-        case block1 = 27
-        case block2 = 23
-        
-        var option: MessageOptionKey {
-            MessageOptionKey(rawValue: self.rawValue)!
-        }
-    }
-    
-    func szx(_ block: CoAPMessage.SZX) -> Int {
-        // If no option set we are treating it as maximal size (6).
-        // SZX affects block size as 2^(SZX+4) meaning 0 is 16 bytes and 6 is 1024.
-        guard let option: UInt32 = self.options.first(where: {$0.key == block.option})?.value.into() else { return 6 }
-        return Int(option & 0b111)
-    }
-    
-    // Actual size 16 to 1024.
-    static func blockSize(szx: Int) -> Int { 1 << (szx + 4) }
-}

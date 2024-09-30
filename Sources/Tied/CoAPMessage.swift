@@ -73,6 +73,10 @@ public struct CoAPMessage {
     ) {
         self.init(code: code as MessageCode, type: type, messageId: messageId, token: token, options: options, payload: payload)
     }
+    
+    static func empty(type: CoAPMessage.MessageType, messageId: UInt16) -> CoAPMessage {
+        CoAPMessage(code: Code.empty, type: type, messageId: messageId, token: 0, options: [], payload: Data())
+    }
 
     var version: Version
     var code: MessageCode
@@ -530,6 +534,56 @@ public extension CoAPMessage {
 
     // Yes, it's not a Set but set in common sense.
     typealias MessageOptionSet = [MessageOption]
+}
+
+extension CoAPMessage {
+    // To limit option keys which could be passed to `func szx()`.
+    enum BlockOptionType: UInt8 {
+        case block1 = 27
+        case block2 = 23
+        
+        var option: MessageOptionKey {
+            MessageOptionKey(rawValue: self.rawValue)!
+        }
+    }
+    
+    func szx(_ block: CoAPMessage.BlockOptionType) -> UInt4 {
+        // If no option set we are treating it as maximal size (6).
+        // SZX affects block size as 2^(SZX+4) meaning 0 is 16 bytes and 6 is 1024.
+        guard let option: UInt32 = self.options.first(where: {$0.key == block.option})?.value.into() else { return 6 }
+        return UInt4(option & 0b111)
+    }
+    
+    // Actual size 16 to 1024.
+    static func blockSize(szx: UInt4) -> Int { 1 << (szx + 4) }
+    
+    /// Only applies to outgoing messages.
+    var isObserve: Bool {
+        self.options.contains(where: { $0.key == .observe && $0.value.into() == 0 })
+    }
+    
+    /// Check M bit in block1, block2 options.
+    func areMoreBlocksExpected(_ block: CoAPMessage.BlockOptionType) -> Bool {
+        guard let block2Option = self.options.first(where: {$0.key == block.option})?.value,
+              let lastByte = block2Option.withUnsafeBytes({$0.last}) else { return false }
+        return (lastByte >> 3) & 0b1 == 1
+    }
+    
+    var blockNumber: UInt32 {
+        guard let block2Option: UInt32 = self.options.first(where: {$0.key == .block2})?.value.into() else { return 0 }
+        return block2Option >> 4
+    }
+    
+    /// Create an ACK with original mesage ID.
+    func prepareAcknowledgement() -> CoAPMessage {
+        CoAPMessage.empty(type: .acknowledgement, messageId: self.messageId)
+    }
+}
+
+extension CoAPMessage.MessageOption {
+    static func blockOption(for block: CoAPMessage.BlockOptionType, num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
+        CoAPMessage.MessageOption(key: block.option, value: try! UInt32(num << 4 | (more ? 1 : 0) << 3 | UInt32(szx)).into())
+    }
 }
 
 private extension UInt32 {

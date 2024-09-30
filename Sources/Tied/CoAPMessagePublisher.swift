@@ -70,15 +70,19 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         guard outgoingMessages.isEmpty == false else {
             return nil
         }
-        self.isObserve = outgoingMessages.first!.isObserve
-        self.token = outgoingMessages.first!.token
+        let type = outgoingMessages.first!.type
+        let token = outgoingMessages.first!.token
+        let isObserve = outgoingMessages.first!.isObserve
+        
+        self.isObserve = isObserve
+        self.token = token
         self.subscriber = subscriber
         self.connection = connection
         
         var unsentMessages: [CoAPMessage] = outgoingMessages
         
         connection.messagePublisher
-            .filter { $0.token == outgoingMessages.first!.token }
+            .filter { $0.token == token }
             .removeDuplicates()
             .sink { [weak self] completion in
                 self?.subscriber?.receive(completion: completion)
@@ -89,7 +93,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                     self?.connection?.performMessageSend(message.prepareAcknowledgement())
                 }
                 // Remove from unsent messages the message acknowledged.
-                if outgoingMessages.first!.type == .confirmable,
+                if type == .confirmable,
                    message.type == .acknowledgement {
                     if let id = unsentMessages.first(where: { $0.messageId == message.messageId })?.messageId {
                         unsentMessages.removeAll(where: { $0.messageId == id })
@@ -119,7 +123,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 }
                 // If message has no observe option it is meant to be replied once so
                 // if no more blocks expected to be received or sent we could stop waiting for more messages.
-                if outgoingMessages.first!.isObserve == false &&
+                if isObserve == false &&
                     message.areMoreBlocksExpected(.block2) == false &&
                     unsentMessages.isEmpty
                 {

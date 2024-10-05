@@ -12,6 +12,11 @@ public typealias MessagePayloadRepublisher = AnyPublisher<Data, Error>
 public typealias CastingResponsePayloadsRepublisher<T> = AnyPublisher<T, Error>
 
 public struct CoAPMessagePublisher: Publisher {
+    // TODO: need to introduce
+    // internal init(connection: Tied.Connection, outgoingMessages: Data)
+    // to do the dynamic message chunking based on szx returned from server.
+    // MessageSubscription have to be inited with Data and not [CoAPMessage].
+    
     internal init(connection: Tied.Connection, outgoingMessages: CoAPMessage...) {
         self.connection = connection
         messages = outgoingMessages
@@ -45,7 +50,7 @@ public struct CoAPMessagePublisher: Publisher {
             var (acc, ready) = partial
             if ready { acc = [] }
             acc.append(message)
-            ready = message.areMoreBlocksExpected(.block2) == false
+            ready = message.options.block2()?.moreBlocksExpected ?? false == false
             return (acc.sorted(by: { $0.blockNumber < $1.blockNumber }), ready)
         }
         .filter { (_: [CoAPMessage], ready: Bool) -> Bool in
@@ -72,7 +77,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         }
         let type = outgoingMessages.first!.type
         let token = outgoingMessages.first!.token
-        let isObserve = outgoingMessages.first!.isObserve
+        let isObserve = outgoingMessages.first!.options.observe() == .isObserve
         
         self.isObserve = isObserve
         self.token = token
@@ -105,7 +110,11 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                     }
                 }
                 _ = self?.subscriber?.receive(message)
-                if message.areMoreBlocksExpected(.block2), let token = self?.token {
+                if // M bit is not nil and set to true.
+                    message.options.block2()?.moreBlocksExpected ?? false,
+                    let token = self?.token {
+                    let num = message.options.block2()?.blockNumber ?? 0
+                    let szx = message.options.block2()?.szx ?? 6
                     unsentMessages.append(
                         CoAPMessage(
                             code: .get,
@@ -113,10 +122,9 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                             messageId: randomUnsigned(),
                             token: token,
                             options: [
-                                CoAPMessage.MessageOption.blockOption(for: .block2,
-                                                                      num: message.blockNumber + 1,
-                                                                      more: false,
-                                                                      szx: message.szx(.block2)),
+                                CoAPMessage.MessageOption.block2(num: num + 1,
+                                                                 more: false,
+                                                                 szx: szx),
                             ]
                         )
                     )
@@ -124,7 +132,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 // If message has no observe option it is meant to be replied once so
                 // if no more blocks expected to be received or sent we could stop waiting for more messages.
                 if isObserve == false &&
-                    message.areMoreBlocksExpected(.block2) == false &&
+                    message.options.block2()?.moreBlocksExpected ?? false == false &&
                     unsentMessages.isEmpty
                 {
                     self?.subscriber?.receive(completion: .finished)

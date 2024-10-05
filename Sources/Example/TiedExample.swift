@@ -21,9 +21,7 @@ class TiedExample {
     }
 
     init() {
-        let pskData = Data()
-        let settings = Tied.Settings(endpoint: NWEndpoint.hostPort(host: "127.0.0.1", port: 5683),
-                                     security: Tied.Settings.Security(psk: pskData, cipherSuite: TLS_PSK_WITH_AES_256_GCM_SHA384))
+        let settings = Tied.Settings(host: "127.0.0.1")
         connection = Tied.newConnection(with: settings)
     }
 

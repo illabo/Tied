@@ -49,7 +49,7 @@ public struct CoAPMessage {
         self.options = options
         self.payload = payload
     }
-
+    
     // Additional init to have the type hint for `MessageCode`.
     public init(
         code: Code.Method,
@@ -61,7 +61,7 @@ public struct CoAPMessage {
     ) {
         self.init(code: code as MessageCode, type: type, messageId: messageId, token: token, options: options, payload: payload)
     }
-
+    
     // Additional init to have the type hint for `MessageCode`.
     public init(
         code: Code.Response,
@@ -77,7 +77,7 @@ public struct CoAPMessage {
     static func empty(type: CoAPMessage.MessageType, messageId: UInt16) -> CoAPMessage {
         CoAPMessage(code: Code.empty, type: type, messageId: messageId, token: 0, options: [], payload: Data())
     }
-
+    
     var version: Version
     var code: MessageCode
     var type: MessageType
@@ -85,7 +85,7 @@ public struct CoAPMessage {
     var token: UInt64
     var options: MessageOptionSet
     var payload: Data
-
+    
     private var tokenLength: UInt4 { code == Code.empty ? 0 : UInt4(tokenData.count) }
     private var tokenData: Data { Data(withUnsafeBytes(of: token.bigEndian) { [UInt8]($0) }.drop { $0 == .zero }) }
 }
@@ -94,12 +94,12 @@ extension CoAPMessage: DataCodable {
     enum MessageError: Error {
         case formatError
     }
-
+    
     func encode() throws -> Data {
         guard let codeValue = code.rawValue else {
             throw code.codeError
         }
-
+        
         // Message format per RFC 7252:
         //
         //  0               1               2               3
@@ -114,7 +114,7 @@ extension CoAPMessage: DataCodable {
         // |1 1 1 1 1 1 1 1|    Payload (if any) ...
         // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         var output = Data()
-
+        
         // Constructing and appending the first byte (Ver, T, TKL).
         // Version and Type are of type UInt4 here.
         let verT = (version.rawValue << 2) + type.rawValue
@@ -122,21 +122,21 @@ extension CoAPMessage: DataCodable {
         output.append(codeValue)
         // Look after endianness!
         output.append(contentsOf: Swift.withUnsafeBytes(of: messageId.bigEndian) { [UInt8]($0) })
-
+        
         // 'Empty Message' code 0.00 should not have anything beyond first 4 bytes.
         if code == Code.empty { return output }
-
+        
         output.append(contentsOf: tokenData)
         output.append(contentsOf: options.encode())
-
+        
         // If payload is not empty add separator and actual payload data.
         guard payload.isEmpty == false else { return output }
         output.append(UInt8.max) // Payload separator.
         output.append(contentsOf: payload)
-
+        
         return output
     }
-
+    
     // Decode actually.
     static func with(_ buffer: UnsafeRawBufferPointer) throws -> CoAPMessage {
         let firstByte = buffer.load(fromByteOffset: 0, as: UInt8.self)
@@ -154,15 +154,15 @@ extension CoAPMessage: DataCodable {
         }.reduce(into: UInt64(0)) {
             $0 = UInt64($0 << 8) | UInt64($1)
         }
-
+        
         guard let pointer = buffer.bindMemory(to: UInt8.self).baseAddress else { throw MessageError.formatError }
         var offset = 4 + Int(tokenLength)
         let maxOffset = buffer.count // If no payload there's no payload separator. Options parsing should stop once the buffer end reached.
         var options: CoAPMessage.MessageOptionSet = []
         try MessageOptionSet.parseOptions(parsing: pointer, startOffset: &offset, maxOffset: maxOffset, output: &options)
-
+        
         var payload = Data()
-
+        
         if offset < maxOffset {
             // Check payload separator value is correct.
             guard pointer.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: 1, { $0.pointee }) == 0xFF else {
@@ -174,7 +174,7 @@ extension CoAPMessage: DataCodable {
                 Data(bytes: $0, count: capacity)
             }
         }
-
+        
         return CoAPMessage(
             version: version,
             code: code,
@@ -211,30 +211,30 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
             CoAPMessage.MessageOption(key: $0.key, value: $0.value)
         }
     }
-
+    
     func encode() -> Data {
         var lastDelta: UInt32 = 0
         var output = Data()
-
+        
         sorted()
             .forEach { option in
                 let delta = UInt32(option.key) - lastDelta
                 let length = UInt32(option.value.count)
-
+                
                 let (optionDeltaValue, extendedDeltaValue) = Self.checkExtendedValue(delta)
                 let (optionLengthValue, extendedLengthValue) = Self.checkExtendedValue(length)
-
+                
                 output.append(UInt8(optionDeltaValue) << 4 + UInt8(optionLengthValue))
                 output.append(contentsOf: extendedDeltaValue)
                 output.append(contentsOf: extendedLengthValue)
                 output.append(contentsOf: option.value)
-
+                
                 lastDelta += delta
             }
-
+        
         return output
     }
-
+    
     // Option Delta and Option Length values explained per RFC 7252:
     //
     //  4-bit unsigned integer.  A value between 0 and 12
@@ -253,7 +253,7 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
     private static let extendTo8bitIndicator: UInt4 = 13
     private static let extendTo16bitIndicator: UInt4 = 14
     private static let reservedIndicator: UInt4 = 15
-
+    
     private static func checkExtendedValue(_ value: UInt32) -> (UInt4, Data) {
         if value < Self.extendTo8bitIndicator {
             return (
@@ -276,7 +276,7 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
         }
         return (0, Data())
     }
-
+    
     fileprivate static func parseOptions(
         parsing bytes: UnsafePointer<UInt8>,
         startOffset offset: UnsafeMutablePointer<Int>,
@@ -310,36 +310,36 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
         //
         var deltaLength = bytes.advanced(by: offset.pointee).pointee
         var lastDelta = 0
-
+        
         while deltaLength != 0xFF, offset.pointee < maxOffset {
             offset.pointee += 1
-
+            
             var optionLength = Int(deltaLength & 0b1111)
             var optionDelta = Int(deltaLength >> 4)
-
+            
             optionDelta = try Self.optionDeltaOrLengthValue(initialValue: optionDelta, parsing: bytes, currentOffset: offset)
             optionLength = try Self.optionDeltaOrLengthValue(initialValue: optionLength, parsing: bytes, currentOffset: offset)
-
+            
             // Here we should get the Option Number.
             let optionNumber = optionDelta + lastDelta
             let optionBody = bytes.advanced(by: offset.pointee).withMemoryRebound(to: UInt8.self, capacity: optionLength) {
                 Data(bytes: $0, count: optionLength)
             }
-
+            
             guard let optionKey = CoAPMessage.MessageOptionKey(rawValue: UInt8(optionNumber)) else {
                 throw CoAPMessage.MessageError.formatError
             }
-
+            
             output.pointee.append(CoAPMessage.MessageOption(key: optionKey, value: optionBody))
-
+            
             // Prep for the next parse.
             lastDelta += optionDelta
             offset.pointee += optionLength
-
+            
             deltaLength = bytes.advanced(by: offset.pointee).pointee
         }
     }
-
+    
     // Returns the final value of extended Option Delta or Option Length
     private static func optionDeltaOrLengthValue(
         initialValue: Int,
@@ -358,7 +358,7 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
             offset.pointee += 2
         }
         if value > Int(Self.extendTo16bitIndicator) { throw CoAPMessage.MessageError.formatError }
-
+        
         return value
     }
 }
@@ -367,11 +367,11 @@ public extension CoAPMessage {
     enum Version: UInt4 {
         case v1 = 1
     }
-
+    
     enum Code: MessageCode {
         case empty
         case custom(codeClass: UInt8, codeDetail: UInt8)
-
+        
         public var rawValue: UInt8? {
             switch self {
             case .empty:
@@ -380,13 +380,13 @@ public extension CoAPMessage {
                 return Self.value(codeClass: c, codeDetail: dd)
             }
         }
-
+        
         public enum Method: MessageCode, CaseIterable {
             case get
             case post
             case put
             case delete
-
+            
             public var rawValue: UInt8? {
                 switch self {
                 case .get:
@@ -400,7 +400,7 @@ public extension CoAPMessage {
                 }
             }
         }
-
+        
         public enum Response: MessageCode, CaseIterable {
             case created
             case deleted
@@ -423,7 +423,7 @@ public extension CoAPMessage {
             case serviceUnavailable
             case gatewayTimeout
             case proxyingNotSupported
-
+            
             public var rawValue: UInt8? {
                 switch self {
                 case .created:
@@ -471,13 +471,13 @@ public extension CoAPMessage {
                 }
             }
         }
-
+        
         static func value(codeClass: UInt8, codeDetail: UInt8) -> UInt8? {
             // No more than 3 bits per class and 5 bits per detail.
             guard codeClass <= 0b111, codeDetail <= 0b11111 else { return nil }
             return UInt8((codeClass << 5) + codeDetail)
         }
-
+        
         static func code(from value: UInt8) -> MessageCode? {
             if value == 0 { return Self.empty }
             if let methodCode = Method.allCases.first(where: { $0.rawValue == value }) {
@@ -489,23 +489,23 @@ public extension CoAPMessage {
             return Self.custom(codeClass: (value >> 5) & 0b111, codeDetail: value & 0b11111)
         }
     }
-
+    
     enum MessageType: UInt4 {
         case confirmable = 0
         case nonconfirmable = 1
         case acknowledgement = 2
         case reset = 3
     }
-
+    
     struct MessageOption: Comparable {
         let key: MessageOptionKey
         let value: Data
-
+        
         public static func < (lhs: Self, rhs: Self) -> Bool {
             lhs.key < rhs.key
         }
     }
-
+    
     enum MessageOptionKey: UInt8, Comparable {
         case ifMatch = 1
         case uriHost = 3
@@ -526,12 +526,12 @@ public extension CoAPMessage {
         case proxyUri = 35
         case proxyScheme = 39
         case size1 = 60
-
+        
         public static func < (lhs: Self, rhs: Self) -> Bool {
             lhs.rawValue < rhs.rawValue
         }
     }
-
+    
     // Yes, it's not a Set but set in common sense.
     typealias MessageOptionSet = [MessageOption]
 }
@@ -580,11 +580,167 @@ extension CoAPMessage {
     }
 }
 
+protocol CoAPMessageOptionValue {}
+
 extension CoAPMessage.MessageOption {
-    static func blockOption(for block: CoAPMessage.BlockOptionType, num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
-        CoAPMessage.MessageOption(key: block.option, value: try! UInt32(num << 4 | (more ? 1 : 0) << 3 | UInt32(szx)).into())
+    static func block1(num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
+        Self.blockOption(for: .block1, num: num, more: more, szx: szx)
+    }
+    
+    static func block2(num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
+        Self.blockOption(for: .block2, num: num, more: more, szx: szx)
+    }
+    
+    // Careful! Valid `CoAPMessage.MessageOptionKey`s are only .block1 and .block2 yet any key might be passed by mistake.
+    fileprivate static func blockOption(for key: CoAPMessage.MessageOptionKey, num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
+        CoAPMessage.MessageOption(key: key, value: try! UInt32(num << 4 | (more ? 1 : 0) << 3 | UInt32(szx)).into())
+    }
+    
+    enum ObserveValue: UInt8, CoAPMessageOptionValue, DataEncodable {
+        case isObserve = 0
+        case cancelObserve = 1
+        
+        init?(data: Data) {
+            guard let i: UInt8 = data.into() else { return nil }
+            self.init(rawValue: i)
+        }
+        
+        func encode() throws -> Data {
+            try rawValue.into()
+        }
+    }
+    
+    struct BlockValue: CoAPMessageOptionValue, DataEncodable {
+        enum Error: Swift.Error {
+            case illegalData
+            case numTooLarge(UInt32)
+            case unsupportedSZX(UInt4)
+        }
+        
+        let blockNumber: UInt32
+        let moreBlocksExpected: Bool
+        let szx: UInt4
+        
+        init(blockNumber: UInt32, moreBlocksExpected: Bool, szx: UInt4) throws {
+            guard blockNumber < (UInt32.max >> 12) else { throw Error.numTooLarge(blockNumber) }
+            guard szx < 6 else { throw Error.unsupportedSZX(szx) }
+            self.blockNumber = blockNumber
+            self.moreBlocksExpected = moreBlocksExpected
+            self.szx = szx
+        }
+        
+        init(data: Data) throws {
+            guard let option: UInt32 = data.into() else { throw Error.illegalData }
+            blockNumber = option >> 4
+            moreBlocksExpected = (option >> 3 & 0b1) == 1
+            szx = UInt4(option & 0b111)
+        }
+        
+        func encode() throws -> Data {
+            try UInt32(blockNumber << 4 | (moreBlocksExpected ? 1 : 0) << 3 | UInt32(szx)).into()
+        }
     }
 }
+
+
+extension CoAPMessage.MessageOptionSet {
+    
+    func ifMatch() -> Data? {
+        guard let option = first(where: { $0.key == .ifMatch }) else { return nil }
+        return option.value
+    }
+    
+    func uriHost() -> String? {
+        guard let option = first(where: { $0.key == .uriHost }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func etag() -> Data? {
+        guard let option = first(where: { $0.key == .etag }) else { return nil }
+        return option.value
+    }
+    
+    func ifNoneMatch() -> Bool {
+        return first(where: { $0.key == .ifNoneMatch }) != nil
+    }
+    
+    func observe() -> CoAPMessage.MessageOption.ObserveValue? {
+        guard let option = first(where: { $0.key == .observe }) else { return nil }
+        return CoAPMessage.MessageOption.ObserveValue(data: option.value)
+    }
+    
+    func uriPort() -> UInt16? {
+        guard let option = first(where: { $0.key == .uriPort }) else { return nil }
+        return option.value.into()
+    }
+    
+    func locationPath() -> String? {
+        guard let option = first(where: { $0.key == .locationPath }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func uriPath() -> String? {
+        guard let option = first(where: { $0.key == .uriPath }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func contentFormat() -> UInt16? {
+        guard let option = first(where: { $0.key == .contentFormat }) else { return nil }
+        return option.value.into()
+    }
+    
+    func maxAge() -> UInt32? {
+        guard let option = first(where: { $0.key == .maxAge }) else { return nil }
+        return option.value.into()
+    }
+    
+    func uriQuery() -> String? {
+        guard let option = first(where: { $0.key == .uriQuery }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func accept() -> UInt16? {
+        guard let option = first(where: { $0.key == .accept }) else { return nil }
+        return option.value.into()
+    }
+    
+    func locationQuery() -> String? {
+        guard let option = first(where: { $0.key == .locationQuery }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func block2() -> CoAPMessage.MessageOption.BlockValue? {
+        guard let option = first(where: { $0.key == .block2 }) else { return nil }
+        return try? CoAPMessage.MessageOption.BlockValue(data: option.value)
+    }
+    
+    func block1() -> CoAPMessage.MessageOption.BlockValue? {
+        guard let option = first(where: { $0.key == .block1 }) else { return nil }
+        return try? CoAPMessage.MessageOption.BlockValue(data: option.value)
+    }
+    
+    func size2() -> UInt32? {
+        guard let option = first(where: { $0.key == .size2 }) else { return nil }
+        return option.value.into()
+    }
+    
+    func proxyUri() -> String? {
+        guard let option = first(where: { $0.key == .proxyUri }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func proxyScheme() -> String? {
+        guard let option = first(where: { $0.key == .proxyScheme }) else { return nil }
+        return String(data: option.value, encoding: .utf8)
+    }
+    
+    func size1() -> UInt32? {
+        guard let option = first(where: { $0.key == .size1 }) else { return nil }
+        return option.value.into()
+    }
+}
+
+
 
 private extension UInt32 {
     init(_ optionKey: CoAPMessage.MessageOptionKey) {

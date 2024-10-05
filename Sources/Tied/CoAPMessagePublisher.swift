@@ -91,7 +91,10 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         var unsentMessages: [CoAPMessage] = outgoingMessages
         
         connection.messagePublisher
-            .filter { $0.token == token }
+            .filter {
+                $0.token == token ||
+                unsentMessages.map(\.messageId).contains($0.messageId)
+            }
             .removeDuplicates()
             .sink { [weak self] completion in
                 self?.subscriber?.receive(completion: completion)

@@ -168,8 +168,10 @@ extension Tied.Connection {
             if let data = completeContent, let message = try? CoAPMessage.with(data.withUnsafeBytes { $0 }) {
                 // Set SZX for future transfers.
                 if let szx = message.options.block1()?.szx { self.block1Szx = szx }
-                guard sessionTokens.contains(message.token) else {
-                    // If message is unexpected send RST to server to stop sends.
+                // If the message has code Empty (0.00) theres no token. In `CoAPMessage` type it would be set to 0.
+                // Empty messages act as ACKs or RSTs and have to be relayed to `messagePublisher`.
+                guard message.token == 0 || sessionTokens.contains(message.token) else {
+                    // If message is unexpected send RST to server to stop further retransmissions.
                     performMessageSend(CoAPMessage.empty(type: .reset, messageId: message.messageId))
                     return
                 }

@@ -46,7 +46,10 @@ public struct CoAPMessagePublisher: Publisher {
     /// This method returning `MessagePayloadRepublisher` extracts payloads from `CoAPMessage`s
     /// and also removes the burden of joining block2 payloads by consumer.
     public func republishResponsePayloads() -> MessagePayloadRepublisher {
-        scan(([CoAPMessage](), false)) { (partial: ([CoAPMessage], Bool), message: CoAPMessage) -> ([CoAPMessage], Bool) in
+        filter {
+            $0.payload.isEmpty == false
+        }
+        .scan(([CoAPMessage](), false)) { (partial: ([CoAPMessage], Bool), message: CoAPMessage) -> ([CoAPMessage], Bool) in
             var (acc, ready) = partial
             if ready { acc = [] }
             acc.append(message)
@@ -93,25 +96,35 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 self?.subscriber?.receive(completion: completion)
                 self?.cancel()
             } receiveValue: { [weak self] message in
+                // Send whatever we recieved to consumer if they want to sort all the messages out.
+                // Correct responses to be done below.
+                // If the consumer is only interested in 'stiched' payload
+                // `CoAPMessagePublisher` methods `republishResponsePayloads()` and
+                // `castingResponsePayloads<TargetType>(with handler: @escaping (Data) -> TargetType)`
+                // would do the cleaning for consumer.
+                _ = self?.subscriber?.receive(message)
+
                 // If the message from server is CON we have to reply with ACK.
                 if message.type == .confirmable {
                     self?.connection?.performMessageSend(message.prepareAcknowledgement())
                 }
-                // Remove from unsent messages the message acknowledged.
+                // Remove from unsent messages the message just acknowledged.
                 if type == .confirmable,
                    message.type == .acknowledgement {
-                    if let id = unsentMessages.first(where: { $0.messageId == message.messageId })?.messageId {
-                        unsentMessages.removeAll(where: { $0.messageId == id })
-                    }
+                    unsentMessages.removeAll(where: { $0.messageId == message.messageId })
                     // If it is just acknowlidgement with no content
                     // we would wait for the message with content yet to come.
                     if message.code == CoAPMessage.Code.empty {
                         return
                     }
                 }
-                _ = self?.subscriber?.receive(message)
-                if // M bit is not nil and set to true.
-                    message.options.block2()?.moreBlocksExpected ?? false,
+                // Cancel observing or don't expect the meaningful response from server.
+                if message.type == .reset {
+                    self?.subscriber?.receive(completion: .finished)
+                    self?.cancel()
+                }
+                // If M bit is not nil and set to true request next block.
+                if message.options.block2()?.moreBlocksExpected ?? false,
                     let token = self?.token {
                     let num = message.options.block2()?.blockNumber ?? 0
                     let szx = message.options.block2()?.szx ?? 6

@@ -7,7 +7,7 @@
 
 import Foundation
 
-func randomUnsigned<U>() -> U where U: UnsignedInteger, U: FixedWidthInteger {
+public func randomUnsigned<U>() -> U where U: UnsignedInteger, U: FixedWidthInteger {
     let byteCount = U.self.bitWidth / UInt8.bitWidth
     var randomBytes = Data(count: byteCount)
     

@@ -582,7 +582,7 @@ extension CoAPMessage {
 
 protocol CoAPMessageOptionValue {}
 
-extension CoAPMessage.MessageOption {
+public extension CoAPMessage.MessageOption {
     static func block1(num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
         Self.blockOption(for: .block1, num: num, more: more, szx: szx)
     }
@@ -590,7 +590,9 @@ extension CoAPMessage.MessageOption {
     static func block2(num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
         Self.blockOption(for: .block2, num: num, more: more, szx: szx)
     }
-    
+}
+
+extension CoAPMessage.MessageOption {
     // Careful! Valid `CoAPMessage.MessageOptionKey`s are only .block1 and .block2 yet any key might be passed by mistake.
     fileprivate static func blockOption(for key: CoAPMessage.MessageOptionKey, num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
         CoAPMessage.MessageOption(key: key, value: try! UInt32(num << 4 | (more ? 1 : 0) << 3 | UInt32(szx)).into())

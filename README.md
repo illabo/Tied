@@ -12,7 +12,7 @@ This repo is still 'Work in progress', not the full spec is covered, however it 
 
 ### Quickstart
 ```swift
-Tied.newConnection(with: Tied.Settings(endpoint: endpoint))
+Tied.newConnection(with: Tied.Settings(host: "127.0.0.1"))
     .sendMessage(payload: "Cat piss or sauvignon blanc?".data(using: .utf8)!)
     .castingResponsePayloads { payload in
         String(data: payload, encoding: .utf8)

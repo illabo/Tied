@@ -43,6 +43,11 @@ public struct Tied {
         private let networkConnection: NWConnection
         private var timestamp: TimeInterval
         private var pingTimer: Timer?
+        // Stored between message sends.
+        // SZX keeps server preference and applies to all the transfers. Need to be visible to `CoAPMessagePublisher`.
+        var block1Szx: UInt4 = 6
+        // Active sessions' tokens.
+        private var sessionTokens = Set<UInt64>()
     }
     
     public struct Settings {
@@ -161,6 +166,13 @@ extension Tied.Connection {
             }
             
             if let data = completeContent, let message = try? CoAPMessage.with(data.withUnsafeBytes { $0 }) {
+                // Set SZX for future transfers.
+                if let szx = message.options.block1()?.szx { self.block1Szx = szx }
+                guard sessionTokens.contains(message.token) else {
+                    // If message is unexpected send RST to server to stop sends.
+                    performMessageSend(CoAPMessage.empty(type: .reset, messageId: message.messageId))
+                    return
+                }
                 self.messagePublisher.send(message)
             }
             
@@ -202,6 +214,8 @@ extension Tied.Connection {
     // It is the method used internally. Called from MessageSubscription class upon setup,
     // sending ACKs or when message session publisher is done.
     func performMessageSend(_ message: CoAPMessage) {
+        // Don't forget to memoize the session. :)
+        sessionTokens.insert(message.token)
         networkConnection.send(content: try? message.encode(), completion: .contentProcessed { [weak self] error in
             guard let self = self else { return }
             if let error = error {
@@ -210,13 +224,20 @@ extension Tied.Connection {
         })
     }
     
-    func stopSession(for token: UInt64) {
+    // If not provided with 'observed' parameter prefer to
+    // notify server about termination of communication.
+    func stopSession(for token: UInt64, observed: Bool = true) {
+        self.sessionTokens.remove(token)
+        // If not observed no need to notify send unsubscribe message.
+        guard observed else { return }
         // Message to unsubscribe observer from resource.
         let message = CoAPMessage(code: .get,
                                   type: .nonconfirmable,
                                   messageId: randomUnsigned(),
                                   token: token,
-                                  options: [.init(key: .observe, value: try! UInt8(1).into())],
+                                  options: [
+                                    CoAPMessage.MessageOption(key: .observe, value: try! CoAPMessage.MessageOption.ObserveValue.cancelObserve.encode())
+                                  ],
                                   payload: Data())
         performMessageSend(message)
     }

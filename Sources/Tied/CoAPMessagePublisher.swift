@@ -87,6 +87,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         self.subscriber = subscriber
         self.connection = connection
         
+        // TODO: When (re-)chunking block1 messages read the SZX value from connection.block1Szx.
         var unsentMessages: [CoAPMessage] = outgoingMessages
         
         connection.messagePublisher
@@ -103,7 +104,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 // `castingResponsePayloads<TargetType>(with handler: @escaping (Data) -> TargetType)`
                 // would do the cleaning for consumer.
                 _ = self?.subscriber?.receive(message)
-
+                
                 // If the message from server is CON we have to reply with ACK.
                 if message.type == .confirmable {
                     self?.connection?.performMessageSend(message.prepareAcknowledgement())
@@ -125,7 +126,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 }
                 // If M bit is not nil and set to true request next block.
                 if message.options.block2()?.moreBlocksExpected ?? false,
-                    let token = self?.token {
+                   let token = self?.token {
                     let num = message.options.block2()?.blockNumber ?? 0
                     let szx = message.options.block2()?.szx ?? 6
                     unsentMessages.append(
@@ -175,9 +176,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
     func request(_: Subscribers.Demand) {}
     
     func cancel() {
-        if self.isObserve {
-            connection?.stopSession(for: self.token)
-        }
+        connection?.stopSession(for: self.token, observed: self.isObserve)
         subscriptions.forEach { subscription in
             subscription.cancel()
         }

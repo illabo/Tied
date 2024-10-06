@@ -9,13 +9,20 @@ import Foundation
 import UInt4
 
 protocol CoAPMessageRepository: AnyObject {
+    /// Initial message type.
     var type: CoAPMessage.MessageType { get }
     var token: UInt64 { get }
+    /// Get next message from retransmission queue.
     func nextMessage() -> CoAPMessage?
+    /// ACK the message to remove from retransmission queue.
     func dequeue(messageId: UInt16)
+    /// Prepare next block and enqueue a message with it into retransmission queue.
     func enqueue(num: UInt32, szx: UInt4)
+    /// Enqueue explicitly e.g. when hendler decides to request more block2 messages.
     func enqueue(message: CoAPMessage)
+    /// Check if message with ID provided is waiting for retransmission.
     func inQueue(messageId: UInt16) -> Bool
+    /// Reset all ACKs and start fron the first message.
     func resetQueue()
 }
 
@@ -33,7 +40,7 @@ class PresetCoAPMessageQueue: CoAPMessageRepository {
         messageQueue.first(where: { acknowledgedMessageIds.contains($0.messageId) == false })
     }
     
-    // Next block number and SZX are ignored because there's now control over library user predefined messages.
+    // Next block number and SZX are ignored because there's no control over user predefined messages.
     func enqueue(num _: UInt32, szx _: UInt4) { }
     
     func dequeue(messageId: UInt16) {

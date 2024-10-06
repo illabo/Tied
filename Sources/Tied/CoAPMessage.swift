@@ -556,7 +556,7 @@ public extension CoAPMessage.MessageOption {
         }
         
         func encode() throws -> Data {
-            try rawValue.into()
+            Data([rawValue])
         }
     }
     
@@ -576,7 +576,8 @@ public extension CoAPMessage.MessageOption {
 extension CoAPMessage.MessageOption {
     // Careful! Valid `CoAPMessage.MessageOptionKey`s are only .block1 and .block2 yet any key might be passed by mistake.
     fileprivate static func blockOption(for key: CoAPMessage.MessageOptionKey, num: UInt32, more: Bool, szx: UInt4) -> CoAPMessage.MessageOption {
-        CoAPMessage.MessageOption(key: key, value: try! UInt32(num << 4 | (more ? 1 : 0) << 3 | UInt32(szx)).into())
+        var be = UInt32(num << 4 | (more ? 1 : 0) << 3 | UInt32(szx)).bigEndian
+        return CoAPMessage.MessageOption(key: key, value: Data(bytes: &be, count: MemoryLayout<UInt32>.size))
     }
     
     struct BlockValue: CoAPMessageOptionValue, DataEncodable {
@@ -609,7 +610,8 @@ extension CoAPMessage.MessageOption {
         }
         
         func encode() throws -> Data {
-            try UInt32(blockNumber << 4 | (moreBlocksExpected ? 1 : 0) << 3 | UInt32(szx)).into()
+            var be = UInt32(blockNumber << 4 | (moreBlocksExpected ? 1 : 0) << 3 | UInt32(szx)).bigEndian
+            return Data(bytes: &be, count: MemoryLayout<UInt32>.size)
         }
     }
 }

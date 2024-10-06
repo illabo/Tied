@@ -20,3 +20,10 @@ public func randomUnsigned<U>() -> U where U: UnsignedInteger, U: FixedWidthInte
         $0.load(as: U.self)
     }
 }
+
+extension UnsignedInteger where Self: FixedWidthInteger {
+    func into() -> Data {
+        var be = self.bigEndian
+        return Data(bytes: &be, count: MemoryLayout<Self>.size)
+    }
+}

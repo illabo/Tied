@@ -117,7 +117,7 @@ class CoAPMessageQueue: CoAPMessageRepository {
             options.append(CoAPMessage.MessageOption(key: .uriHost, value: host.data(using: .utf8) ?? Data()))
         }
         if let port = uriOptions?.port {
-            options.append(CoAPMessage.MessageOption(key: .uriPort, value: try! port.into()))
+            options.append(CoAPMessage.MessageOption(key: .uriPort, value: port.into()))
         }
         options.append(contentsOf: uriOptions?.paths.compactMap { path in
             CoAPMessage.MessageOption(key: .uriPath, value: path.data(using: .utf8) ?? Data())

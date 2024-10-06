@@ -192,25 +192,27 @@ extension Tied.Connection {
 
 extension Tied.Connection {
     /// Sane defaults for effortless message sends.
-    public func sendMessage(method: CoAPMessage.Code.Method = .get,
+    public func sendMessage(method: CoAPMessage.Code.Method? = nil,
                             type: CoAPMessage.MessageType = .confirmable,
                             observe: Bool = false,
-                            path: String? = nil,
-                            payload: Data) -> CoAPMessagePublisher {
-        let options: CoAPMessage.MessageOptionSet = [
-            observe == false ? nil : CoAPMessage.MessageOption(key: .observe, value: try! UInt8(0).into()),
-            path?.isEmpty ?? true ? nil : CoAPMessage.MessageOption(key: .uriPath, value: path!.data(using: .utf8) ?? Data()),
-        ]
-            .compactMap{ $0 }
-        
-        // TODO: block1 chunking have to be done in CoAPMessagePublisher!
-        let message = CoAPMessage(code: method, type: type, messageId: randomUnsigned(), token: randomUnsigned(), options: options, payload: payload)
-        return sendMessage(message)
+                            uriOptions: CoAPURIOptions? = nil,
+                            ifMatch: [Data]? = nil,
+                            ifNoneMatch: Bool = false,
+                            contentFormat: UInt16? = nil,
+                            accept: UInt16? = nil,
+                            payload: Data = Data()) -> CoAPMessagePublisher {
+        // If method is not set default to GET when the payload is empty
+        // and default to POST when there's some payload.
+        let method = method ?? (payload.isEmpty ? .get : .post)
+        return CoAPMessagePublisher(
+            connection: self,
+            outgoingMessages: CoAPMessageQueue(method: method, type: type, token: randomUnsigned(), observe: observe, uriOptions: uriOptions, ifMatch: ifMatch, ifNoneMatch: ifNoneMatch, contentFormat: contentFormat, accept: accept, payload: payload)
+        )
     }
     
-    /// More raw access to `CoAPMessage` type allowing going almost full manual.
-    public func sendMessage(_ message: CoAPMessage) -> CoAPMessagePublisher {
-        CoAPMessagePublisher(connection: self, outgoingMessages: message)
+    /// Discouraged to use unless you need full control over the messages you send
+    public func sendMessage(_ messages: CoAPMessage...) -> CoAPMessagePublisher {
+        CoAPMessagePublisher(connection: self, outgoingMessages: PresetCoAPMessageQueue(messages: messages))
     }
     
     // It is the method used internally. Called from MessageSubscription class upon setup,

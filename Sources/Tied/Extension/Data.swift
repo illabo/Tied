@@ -1,6 +1,6 @@
 //
-//  File.swift
-//  
+//  Data.swift
+//
 //
 //  Created by Yachin Ilya on 29.09.2024.
 //

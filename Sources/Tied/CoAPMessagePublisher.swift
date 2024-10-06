@@ -17,7 +17,7 @@ public struct CoAPMessagePublisher: Publisher {
     // to do the dynamic message chunking based on szx returned from server.
     // MessageSubscription have to be inited with Data and not [CoAPMessage].
     
-    internal init(connection: Tied.Connection, outgoingMessages: CoAPMessage...) {
+    internal init(connection: Tied.Connection, outgoingMessages: CoAPMessageRepository) {
         self.connection = connection
         messages = outgoingMessages
     }
@@ -26,7 +26,7 @@ public struct CoAPMessagePublisher: Publisher {
     public typealias Failure = Error
     
     private let connection: Tied.Connection
-    private let messages: [CoAPMessage]
+    private let messages: CoAPMessageRepository
     
     public func receive<S>(subscriber: S) where S: Subscriber, Failure == S.Failure, Output == S.Input {
         if let subscription = MessageSubscription(
@@ -54,7 +54,7 @@ public struct CoAPMessagePublisher: Publisher {
             if ready { acc = [] }
             acc.append(message)
             ready = message.options.block2()?.moreBlocksExpected ?? false == false
-            return (acc.sorted(by: { $0.blockNumber < $1.blockNumber }), ready)
+            return (acc.sorted(by: { $0.options.block2()?.blockNumber ?? 0 < $1.options.block2()?.blockNumber ?? 0 }), ready)
         }
         .filter { (_: [CoAPMessage], ready: Bool) -> Bool in
             ready
@@ -74,26 +74,21 @@ public struct CoAPMessagePublisher: Publisher {
 }
 
 private final class MessageSubscription<S: Subscriber>: Subscription where S.Input == CoAPMessagePublisher.Output, S.Failure == CoAPMessagePublisher.Failure {
-    internal init?(subscriber: S, connection: Tied.Connection, outgoingMessages: [CoAPMessage]) {
-        guard outgoingMessages.isEmpty == false else {
-            return nil
-        }
-        let type = outgoingMessages.first!.type
-        let token = outgoingMessages.first!.token
-        let isObserve = outgoingMessages.first!.options.observe() == .isObserve
+    internal init?(subscriber: S, connection: Tied.Connection, outgoingMessages: CoAPMessageRepository) {
+        let type = outgoingMessages.type
+        let token = outgoingMessages.token
+        outgoingMessages.enqueue(num: 0, szx: connection.block1Szx) // Don't forget to prepare next message!
+        let isObserve = outgoingMessages.nextMessage()!.options.observe() == .isObserve
         
         self.isObserve = isObserve
         self.token = token
         self.subscriber = subscriber
         self.connection = connection
         
-        // TODO: When (re-)chunking block1 messages read the SZX value from connection.block1Szx.
-        var unsentMessages: [CoAPMessage] = outgoingMessages
-        
         connection.messagePublisher
             .filter {
                 $0.token == token ||
-                unsentMessages.map(\.messageId).contains($0.messageId)
+                outgoingMessages.inQueue(messageId: $0.messageId)
             }
             .removeDuplicates()
             .sink { [weak self] completion in
@@ -115,7 +110,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 // Remove from unsent messages the message just acknowledged.
                 if type == .confirmable,
                    message.type == .acknowledgement {
-                    unsentMessages.removeAll(where: { $0.messageId == message.messageId })
+                    outgoingMessages.dequeue(messageId: message.messageId)
                     // If it is just acknowlidgement with no content
                     // we would wait for the message with content yet to come.
                     if message.code == CoAPMessage.Code.empty {
@@ -132,25 +127,24 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                    let token = self?.token {
                     let num = message.options.block2()?.blockNumber ?? 0
                     let szx = message.options.block2()?.szx ?? 6
-                    unsentMessages.append(
-                        CoAPMessage(
-                            code: .get,
-                            type: .confirmable,
-                            messageId: randomUnsigned(),
-                            token: token,
-                            options: [
-                                CoAPMessage.MessageOption.block2(num: num + 1,
-                                                                 more: false,
-                                                                 szx: szx),
-                            ]
-                        )
-                    )
+                    let message = CoAPMessage(code: .get,
+                                              type: type,
+                                              messageId: randomUnsigned(),
+                                              token: token,
+                                              options: [CoAPMessage.MessageOption.block2(num: num + 1,
+                                                                                         more: false,
+                                                                                         szx: szx)])
+                    if type == .confirmable {
+                        outgoingMessages.enqueue(message: message)
+                    } else {
+                        connection.performMessageSend(message)
+                    }
                 }
                 // If message has no observe option it is meant to be replied once so
                 // if no more blocks expected to be received or sent we could stop waiting for more messages.
                 if isObserve == false &&
                     message.options.block2()?.moreBlocksExpected ?? false == false &&
-                    unsentMessages.isEmpty
+                    outgoingMessages.nextMessage() == nil
                 {
                     self?.subscriber?.receive(completion: .finished)
                     self?.cancel()
@@ -160,11 +154,12 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         
         Timer.TimerPublisher(interval: 1, runLoop: .main, mode: .common).autoconnect()
             .sink { _ in
-                if unsentMessages.first?.type == .confirmable, let next = unsentMessages.first {
+                if let next = outgoingMessages.nextMessage(), next.type == .confirmable {
                     connection.performMessageSend(next)
                 }
-                if unsentMessages.isEmpty == false, unsentMessages.first?.type != .confirmable {
-                    connection.performMessageSend(unsentMessages.removeFirst())
+                if let next = outgoingMessages.nextMessage(), next.type != .confirmable {
+                    connection.performMessageSend(next)
+                    outgoingMessages.dequeue(messageId: next.messageId)
                 }
             }
             .store(in: &subscriptions)

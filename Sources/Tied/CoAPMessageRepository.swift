@@ -107,12 +107,11 @@ class CoAPMessageQueue: CoAPMessageRepository {
     
     // To get initial message set num 0.
     func enqueue(num: UInt32, szx: UInt4) {
-        let blockSize = CoAPMessage.MessageOption.BlockValue.blockSize(szx: szx)
-        let nextCut = lastCutPosition + blockSize
-        var options = CoAPMessage.MessageOptionSet()
         if num != 0, payload.count <= lastCutPosition {
             return // Nothing to enqueue. All the block1 messages have been dequeued.
         }
+        var options = CoAPMessage.MessageOptionSet()
+        
         if let host = uriOptions?.host {
             options.append(CoAPMessage.MessageOption(key: .uriHost, value: host.data(using: .utf8) ?? Data()))
         }
@@ -125,14 +124,39 @@ class CoAPMessageQueue: CoAPMessageRepository {
         options.append(contentsOf: uriOptions?.queries.compactMap { query in
             CoAPMessage.MessageOption(key: .uriQuery, value: query.data(using: .utf8) ?? Data())
         } ?? [])
+        if let contentFormat {
+            options.append(CoAPMessage.MessageOption(key: .contentFormat, value: contentFormat.into()))
+        }
+        if let accept {
+            options.append(CoAPMessage.MessageOption(key: .accept, value: accept.into()))
+        }
         if num == 0 {
             if observe {
                 options.append(CoAPMessage.MessageOption.observe(.isObserve))
             }
+            if let ifMatch {
+                options.append(contentsOf: ifMatch.map { eTag in
+                    CoAPMessage.MessageOption(key: .ifMatch, value: eTag)
+                })
+            }
+            if ifNoneMatch {
+                options.append(CoAPMessage.MessageOption(key: .ifNoneMatch, value: Data()))
+            }
         }
-        if payload.count > blockSize, payload.count > nextCut {
+        
+        let blockSize = CoAPMessage.MessageOption.BlockValue.blockSize(szx: szx)
+        var nextCut = lastCutPosition + blockSize
+        if payload.count < nextCut { nextCut = payload.count }
+        
+        if payload.count > blockSize {
+            let blockSizeOpts = [
+                CoAPMessage.MessageOption.block1(num: num, more: payload.count > nextCut, szx: szx),
+                CoAPMessage.MessageOption(key: .size1, value: UInt(bitPattern: payload.count).into()),
+            ]
+            options.append(contentsOf: blockSizeOpts)
             let block1Payload = payload.subdata(in: lastCutPosition ..< nextCut)
-            // Add block options.
+            lastCutPosition = nextCut
+            
             messageQueue.append(CoAPMessage(code: method, type: type, messageId: randomUnsigned(), token: token, options: options, payload: block1Payload))
             return
         }

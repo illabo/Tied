@@ -109,7 +109,7 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 }
                 // Remove from unsent messages the message just acknowledged.
                 if type == .confirmable,
-                   message.type == .acknowledgement {
+                   message.type == .acknowledgement || message.type == .confirmable {
                     outgoingMessages.dequeue(messageId: message.messageId)
                     // If it is just acknowlidgement with no content
                     // we would wait for the message with content yet to come.
@@ -154,12 +154,14 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         
         Timer.TimerPublisher(interval: 1, runLoop: .main, mode: .common).autoconnect()
             .sink { _ in
-                if let next = outgoingMessages.nextMessage(), next.type == .confirmable {
-                    connection.performMessageSend(next)
-                }
-                if let next = outgoingMessages.nextMessage(), next.type != .confirmable {
-                    connection.performMessageSend(next)
-                    outgoingMessages.dequeue(messageId: next.messageId)
+                if let next = outgoingMessages.nextMessage() {
+                    if next.type == .confirmable {
+                        connection.performMessageSend(next)
+                    }
+                    if next.type != .confirmable {
+                        connection.performMessageSend(next)
+                        outgoingMessages.dequeue(messageId: next.messageId)
+                    }
                 }
             }
             .store(in: &subscriptions)

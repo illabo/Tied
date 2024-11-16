@@ -78,7 +78,9 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         let type = outgoingMessages.type
         let token = outgoingMessages.token
         outgoingMessages.enqueue(num: 0, szx: connection.block1Szx) // Don't forget to prepare next message!
-        let isObserve = outgoingMessages.nextMessage()!.options.observe() == .isObserve
+        var firstMessage = outgoingMessages.nextMessage()
+        let isObserve = firstMessage!.options.observe() == .isObserve
+        let firstMessageID = firstMessage!.messageId
         
         self.isObserve = isObserve
         self.token = token
@@ -88,7 +90,8 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
         connection.messagePublisher
             .filter {
                 $0.token == token ||
-                outgoingMessages.inQueue(messageId: $0.messageId)
+                outgoingMessages.inQueue(messageId: $0.messageId) ||
+                firstMessageID == $0.messageId
             }
             .removeDuplicates()
             .sink { [weak self] completion in
@@ -107,13 +110,18 @@ private final class MessageSubscription<S: Subscriber>: Subscription where S.Inp
                 if message.type == .confirmable {
                     self?.connection?.performMessageSend(message.prepareAcknowledgement())
                 }
-                // Remove from unsent messages the message just acknowledged.
-                if type == .confirmable,
-                   message.type == .acknowledgement || message.type == .confirmable {
+                // Remove from unsent messages the message just acknowledged
+                // because any message response with the matching ID counts as acknowledgement
+                // and even any response with non-matching ID in non-block transfers.
+                if type == .confirmable {
+                    if let first = firstMessage, first.options.block1() == nil {
+                        firstMessage = nil
+                        outgoingMessages.dequeue(messageId: firstMessageID)
+                    }
                     outgoingMessages.dequeue(messageId: message.messageId)
                     // If it is just acknowlidgement with no content
                     // we would wait for the message with content yet to come.
-                    if message.code == CoAPMessage.Code.empty {
+                    if message.type == .acknowledgement && message.code == CoAPMessage.Code.empty {
                         return
                     }
                 }

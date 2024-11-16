@@ -92,7 +92,7 @@ public struct CoAPMessage {
 
 extension CoAPMessage: DataCodable {
     enum MessageError: Error {
-        case formatError
+        case formatError(String?)
     }
     
     func encode() throws -> Data {
@@ -139,40 +139,55 @@ extension CoAPMessage: DataCodable {
     
     // Decode actually.
     static func with(_ buffer: UnsafeRawBufferPointer) throws -> CoAPMessage {
-        let firstByte = buffer.load(fromByteOffset: 0, as: UInt8.self)
+        guard let baseAddress = buffer.baseAddress else {
+            fatalError("Data has no backing storage")
+        }
+        let bufferCount = buffer.count
+        // Treat the raw pointer as a logical sequence of UInt8
+        let buffer = baseAddress.assumingMemoryBound(to: UInt8.self)
+        guard bufferCount >= 4 else { throw MessageError.formatError("Buffer too small") }
+        
+        let firstByte = buffer[0]
         let tokenLength = firstByte & 0b0000_1111
         let mostSignificant = UInt4(clamping: firstByte >> 4)
-        guard
-            let type = MessageType(rawValue: mostSignificant & 0b0011),
-            let version = Version(rawValue: (mostSignificant >> 2) & 0b0011),
-            let code = Code.code(from: buffer.load(fromByteOffset: 1, as: UInt8.self))
-        else { throw MessageError.formatError }
-        let messageId = buffer.load(fromByteOffset: 2, as: UInt16.self)
-        let token = (0 ..< tokenLength).map { offset -> UInt8 in
-            let b = buffer.load(fromByteOffset: 4 + Int(offset), as: UInt8.self)
-            return b
-        }.reduce(into: UInt64(0)) {
-            $0 = UInt64($0 << 8) | UInt64($1)
+        
+        guard let type = MessageType(rawValue: mostSignificant & 0b0011) else {
+            throw MessageError.formatError("Invalid message type")
+        }
+        guard let version = Version(rawValue: (mostSignificant >> 2) & 0b0011) else {
+            throw MessageError.formatError("Invalid message version")
+        }
+        guard let code = Code.code(from: buffer[1]) else {
+            throw MessageError.formatError("Invalid message code")
         }
         
-        guard let pointer = buffer.bindMemory(to: UInt8.self).baseAddress else { throw MessageError.formatError }
+        let messageId = UInt16(buffer[2]) << 8 | UInt16(buffer[3])
+        guard bufferCount >= 4 + tokenLength else {
+            throw MessageError.formatError("Buffer shorter than expected token length")
+        }
+        
+        var token: UInt64 = 0
+        for offset in 0 ..< Int(tokenLength) {
+            token = (token << 8) | UInt64(buffer[4 + offset])
+        }
+        
         var offset = 4 + Int(tokenLength)
-        let maxOffset = buffer.count // If no payload there's no payload separator. Options parsing should stop once the buffer end reached.
+        let maxOffset = bufferCount
         var options: CoAPMessage.MessageOptionSet = []
-        try MessageOptionSet.parseOptions(parsing: pointer, startOffset: &offset, maxOffset: maxOffset, output: &options)
+        
+        try MessageOptionSet.parseOptions(parsing: buffer,
+                                          startOffset: &offset,
+                                          maxOffset: maxOffset,
+                                          output: &options)
         
         var payload = Data()
-        
         if offset < maxOffset {
-            // Check payload separator value is correct.
-            guard pointer.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: 1, { $0.pointee }) == 0xFF else {
-                throw MessageError.formatError
+            guard buffer[offset] == 0xFF else {
+                throw MessageError.formatError("Invalid payload separator")
             }
-            offset += 1 // Skip the payload separator.
-            let capacity = maxOffset - offset
-            payload = pointer.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: capacity) {
-                Data(bytes: $0, count: capacity)
-            }
+            offset += 1
+            let bytes = (offset..<maxOffset).map{ buffer[$0] }
+            payload = Data(bytes)
         }
         
         return CoAPMessage(
@@ -185,6 +200,7 @@ extension CoAPMessage: DataCodable {
             payload: payload
         )
     }
+
 }
 
 extension CoAPMessage: Equatable {
@@ -327,7 +343,7 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
             }
             
             guard let optionKey = CoAPMessage.MessageOptionKey(rawValue: UInt8(optionNumber)) else {
-                throw CoAPMessage.MessageError.formatError
+                throw CoAPMessage.MessageError.formatError("Option number \(optionNumber)")
             }
             
             output.pointee.append(CoAPMessage.MessageOption(key: optionKey, value: optionBody))
@@ -357,7 +373,7 @@ extension CoAPMessage.MessageOptionSet: DataEncodable {
             value += Int(extendedLength) + 0xFF
             offset.pointee += 2
         }
-        if value > Int(Self.extendTo16bitIndicator) { throw CoAPMessage.MessageError.formatError }
+        if value > Int(Self.extendTo16bitIndicator) { throw CoAPMessage.MessageError.formatError("Length indicator exceeds extend to 16 bit indicator") }
         
         return value
     }

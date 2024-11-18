@@ -29,12 +29,17 @@ public struct Tied {
                 // TODO: add adjustable number of ping misses or timeout to settings.
                 if self.timestamp + Double(settings.pingEvery * 3) < timer.fireDate.timeIntervalSince1970 {
                     messagePublisher.send(completion: .failure(Tied.ConectionError.timedOut))
+                    self.pingTimer?.invalidate()
+                    self.pingTimer = nil
                     return
                 }
                 
                 self.performMessageSend(CoAPMessage.empty(type: .confirmable, messageId: randomUnsigned()))
                 timer.fireDate = Date().addingTimeInterval(TimeInterval(settings.pingEvery))
             }
+            if let pingTimer {
+                        RunLoop.current.add(pingTimer, forMode: .default)
+                    }
             
             setupPublisher()
         }
@@ -177,7 +182,6 @@ extension Tied.Connection {
                         performMessageSend(CoAPMessage.empty(type: .reset, messageId: message.messageId))
                         return
                     }
-                    
                     self.messagePublisher.send(message)
                 }
             } catch {
@@ -238,7 +242,8 @@ extension Tied.Connection {
     // notify server about termination of communication.
     func stopSession(for token: UInt64, observed: Bool = true) {
         self.sessionTokens.remove(token)
-        // If not observed no need to notify send unsubscribe message.
+        // If not observed no need to notify by send unsubscribe message.
+        // Optionally you might want to send RST to server instead.
         guard observed else { return }
         // Message to unsubscribe observer from resource.
         let message = CoAPMessage(code: .get,

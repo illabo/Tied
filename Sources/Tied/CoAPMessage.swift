@@ -733,3 +733,61 @@ private extension UInt32 {
         self.init(optionKey.rawValue)
     }
 }
+
+extension CoAPMessage.MessageOption: CustomStringConvertible {
+    public var description: String {
+        switch key {
+        case .ifMatch:
+            return "ifMatch: \(value.hexEncodedString())"
+        case .uriHost, .locationPath, .uriPath, .uriQuery, .proxyUri, .proxyScheme, .locationQuery:
+            return "\(key): \(String(data: value, encoding: .utf8) ?? "Invalid (\(value.hexEncodedString()))")"
+        case .etag:
+            return "etag: \(value.hexEncodedString())"
+        case .ifNoneMatch:
+            return "ifNoneMatch: true"
+        case .observe:
+            if let observeValue = CoAPMessage.MessageOption.ObserveValue(data: value) {
+                return "observe: \(observeValue)"
+            }
+            return "observe: Invalid (\(value.hexEncodedString()))"
+        case .uriPort:
+            if let port = value.into() as UInt16? {
+                return "uriPort: \(port)"
+            }
+            return "uriPort: Invalid (\(value.hexEncodedString()))"
+        case .contentFormat:
+            if let format = value.into() as UInt16? {
+                return "contentFormat: \(format)"
+            }
+            return "contentFormat: Invalid (\(value.hexEncodedString()))"
+        case .maxAge:
+            if let age = value.into() as UInt32? {
+                return "maxAge: \(age)"
+            }
+            return "maxAge: Invalid (\(value.hexEncodedString()))"
+        case .accept:
+            if let accept = value.into() as UInt16? {
+                return "accept: \(accept)"
+            }
+            return "accept: Invalid (\(value.hexEncodedString()))"
+        case .block2, .block1:
+            if let blockValue = try? CoAPMessage.MessageOption.BlockValue(data: value) {
+                return "\(key): \(blockValue)"
+            }
+            return "\(key): Invalid (\(value.hexEncodedString()))"
+        case .size2, .size1:
+            if let size = value.into() as UInt32? {
+                return "\(key): \(size)"
+            }
+            return "\(key): Invalid (\(value.hexEncodedString()))"
+        @unknown default:
+            return "\(key): \(value.hexEncodedString())"
+        }
+    }
+}
+
+fileprivate extension Data {
+    func hexEncodedString() -> String {
+        map { String(format: "%02x", $0) }.joined()
+    }
+}

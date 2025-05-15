@@ -172,7 +172,9 @@ extension Tied.Connection {
             
             do {
                 if let data = completeContent?.map({ $0.bigEndian }) {
-                    let message = try CoAPMessage.with(data.withUnsafeBytes { $0 })
+                    let message = try data.withUnsafeBytes { buffer in
+                        try CoAPMessage.with(buffer)
+                      }
                     // Set SZX for future transfers.
                     if let szx = message.options.block1()?.szx { self.block1Szx = szx }
                     // If the message has code Empty (0.00) theres no token. In `CoAPMessage` type it would be set to 0.
